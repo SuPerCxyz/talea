@@ -83,6 +83,8 @@ talea usage <session-id>        # Token 汇总（--details/--include-subagents/-
 talea timeline <session-id>     # Token 时间线（--group-by/--bucket/--around-peak/--by-model/--context/--insights）
 talea doctor                    # 环境诊断（--json/--agent）
 talea run <agent>               # 包装启动 Agent（记录真实进程时间）
+talea web                       # 本地只读 Web 视图（仅 localhost）
+talea tag <session-id> [标签...] # 标签 / 收藏 / 备注
 talea config path|init|validate
 talea version
 ```
