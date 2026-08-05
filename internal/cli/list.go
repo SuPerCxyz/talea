@@ -18,6 +18,8 @@ func newListCmd() *cobra.Command {
 	var (
 		agentFlag        string
 		cwdFlag          string
+		projectFlag      string
+		branchFlag       string
 		todayFlag        bool
 		activeFlag       bool
 		includeSubagents bool
@@ -50,9 +52,11 @@ func newListCmd() *cobra.Command {
 			}
 
 			q := search.Query{
-				Agent: agentFlag,
-				Cwd:   cwdFlag,
-				Limit: limitFlag,
+				Agent:   agentFlag,
+				Cwd:     cwdFlag,
+				Project: projectFlag,
+				Branch:  branchFlag,
+				Limit:   limitFlag,
 			}
 			if todayFlag {
 				q.SinceDays = 1
@@ -95,6 +99,8 @@ func newListCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "按 Agent 过滤")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "按工作目录前缀过滤")
+	cmd.Flags().StringVar(&projectFlag, "project", "", "按项目名称过滤")
+	cmd.Flags().StringVar(&branchFlag, "branch", "", "按 Git 分支过滤")
 	cmd.Flags().BoolVar(&todayFlag, "today", false, "仅今天")
 	cmd.Flags().BoolVar(&activeFlag, "active", false, "仅活动会话")
 	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, "包含子 Agent 会话")
@@ -106,11 +112,13 @@ func newListCmd() *cobra.Command {
 
 func newSearchCmd() *cobra.Command {
 	var (
-		agentFlag  string
-		cwdFlag    string
-		sinceFlag  int
-		limitFlag  int
-		formatFlag string
+		agentFlag   string
+		cwdFlag     string
+		projectFlag string
+		branchFlag  string
+		sinceFlag   int
+		limitFlag   int
+		formatFlag  string
 	)
 	cmd := &cobra.Command{
 		Use:   "search [关键词]",
@@ -141,6 +149,8 @@ func newSearchCmd() *cobra.Command {
 				Term:      args[0],
 				Agent:     agentFlag,
 				Cwd:       cwdFlag,
+				Project:   projectFlag,
+				Branch:    branchFlag,
 				SinceDays: sinceFlag,
 				Limit:     limitFlag,
 			}
@@ -160,6 +170,8 @@ func newSearchCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "按 Agent 过滤")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "按工作目录前缀过滤")
+	cmd.Flags().StringVar(&projectFlag, "project", "", "按项目名称过滤")
+	cmd.Flags().StringVar(&branchFlag, "branch", "", "按 Git 分支过滤")
 	cmd.Flags().IntVar(&sinceFlag, "since", 0, "最近 N 天")
 	cmd.Flags().IntVar(&limitFlag, "limit", 0, "最多条数")
 	cmd.Flags().StringVar(&formatFlag, "format", "table", "输出格式：table/json/jsonl/csv/markdown")

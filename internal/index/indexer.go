@@ -71,6 +71,7 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 				continue
 			}
 			sess.IndexedAt = sess.UpdatedAt
+			ix.App.ResolveWorkingDirs(ctx, []*model.Session{sess})
 			batch = append(batch, sess)
 		}
 		if len(batch) > 0 {
