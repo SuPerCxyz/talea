@@ -9,6 +9,7 @@ import (
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/run"
 )
@@ -54,8 +55,19 @@ func newRunCmd() *cobra.Command {
 				Args:    cmd2.Args,
 				Cwd:     cwd,
 				UpdateAfter: func(started, ended time.Time, pid, exitCode int) error {
-					// 更新索引中该目录最近会话的进程时间
-					err := run.UpdateSessionTimes(ctx, inst, cwd, started, ended)
+					// 先重新索引，确保进程期间新建的会话被 Discover
+					db, err := index.Open(a.Paths.DBPath)
+					if err == nil {
+						if err := db.Migrate(ctx); err == nil {
+							ix := &index.Indexer{App: a, DB: db}
+							if _, err := ix.Run(ctx); err != nil {
+								fmt.Fprintf(os.Stderr, "talea run: 索引更新失败: %v\n", err)
+							}
+						}
+						db.Close()
+					}
+					// 更新索引中该目录时间窗口内会话的进程时间
+					err = run.UpdateSessionTimes(ctx, inst, cwd, started, ended)
 					if err != nil {
 						return fmt.Errorf("更新会话时间失败: %w", err)
 					}

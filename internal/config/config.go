@@ -137,20 +137,33 @@ type Paths struct {
 }
 
 // ResolvePaths 基于 XDG 环境变量计算路径。
+// 遵循 XDG Base Directory 规范：XDG_* 为绝对路径时直接使用，
+// 否则拼接到 HOME 下。
 func ResolvePaths() Paths {
-	configHome := envOr("XDG_CONFIG_HOME", ".config")
-	dataHome := envOr("XDG_DATA_HOME", ".local/share")
-	cacheHome := envOr("XDG_CACHE_HOME", ".cache")
 	home := homeDir()
+	configHome := xdgHome("XDG_CONFIG_HOME", home, ".config")
+	dataHome := xdgHome("XDG_DATA_HOME", home, ".local/share")
+	cacheHome := xdgHome("XDG_CACHE_HOME", home, ".cache")
 
 	p := Paths{
-		ConfigDir: filepath.Join(home, configHome, "talea"),
-		DataDir:   filepath.Join(home, dataHome, "talea"),
-		CacheDir:  filepath.Join(home, cacheHome, "talea"),
+		ConfigDir: filepath.Join(configHome, "talea"),
+		DataDir:   filepath.Join(dataHome, "talea"),
+		CacheDir:  filepath.Join(cacheHome, "talea"),
 	}
 	p.ConfigPath = filepath.Join(p.ConfigDir, "config.toml")
 	p.DBPath = filepath.Join(p.DataDir, "index.db")
 	return p
+}
+
+// xdgHome 解析单个 XDG 目录：绝对路径直接用，相对路径拼到 home。
+func xdgHome(env, home, def string) string {
+	if v := os.Getenv(env); v != "" {
+		if filepath.IsAbs(v) {
+			return v
+		}
+		return filepath.Join(home, v)
+	}
+	return filepath.Join(home, def)
 }
 
 func homeDir() string {
@@ -158,11 +171,4 @@ func homeDir() string {
 		return h
 	}
 	return "~"
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

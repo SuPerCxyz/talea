@@ -78,8 +78,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	return nil
 }
 
-// UpdateSessionTimes 用真实进程时间更新索引中最近会话的 start/end。
-// 查找 dir 下最后活动的会话，更新其时间来源标记为真实进程时间。
+// UpdateSessionTimes 用真实进程时间更新索引中该目录下时间窗口内的会话。
+// 优先匹配 [started, ended] 窗口内的会话；若该 Agent 会话在启动前已存在于
+// 索引中（Agent 启动即创建会话），则更新其 started/ended 时间来源。
 func UpdateSessionTimes(ctx context.Context, inst model.AgentInstance, dir string,
 	started, ended time.Time) error {
 	db, err := index.Open(indexPaths().DBPath)
@@ -91,20 +92,41 @@ func UpdateSessionTimes(ctx context.Context, inst model.AgentInstance, dir strin
 		return err
 	}
 
+	// 1) 优先：查找 last_activity_at 在 [started-5s, ended+5s] 窗口内、
+	//    且工作目录匹配的会话（进程期间产生的真实会话）。
 	rows, err := db.SQL().QueryContext(ctx, `
 		SELECT session_id FROM sessions
 		WHERE agent_instance_id = ? AND working_directory = ?
-		ORDER BY last_activity_at DESC LIMIT 1`, inst.InstanceID, dir)
+		  AND last_activity_at >= ? AND last_activity_at <= ?
+		ORDER BY last_activity_at DESC LIMIT 1`,
+		inst.InstanceID, dir, started.Add(-5*time.Second).Unix(), ended.Add(5*time.Second).Unix())
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	if !rows.Next() {
-		return fmt.Errorf("未找到 %s 目录下的会话，请先执行 talea index", dir)
-	}
 	var sessionID string
-	if err := rows.Scan(&sessionID); err != nil {
+	found := rows.Next()
+	if err := rows.Scan(&sessionID); err != nil && found {
 		return err
+	}
+	rows.Close()
+
+	// 2) 回退：窗口内无匹配，取该目录最近会话。
+	if !found {
+		rows, err = db.SQL().QueryContext(ctx, `
+			SELECT session_id FROM sessions
+			WHERE agent_instance_id = ? AND working_directory = ?
+			ORDER BY last_activity_at DESC LIMIT 1`, inst.InstanceID, dir)
+		if err != nil {
+			return err
+		}
+		found = rows.Next()
+		if err := rows.Scan(&sessionID); err != nil && found {
+			return err
+		}
+		rows.Close()
+	}
+	if !found {
+		return fmt.Errorf("未找到 %s 目录下的会话，请先执行 talea index", dir)
 	}
 
 	_, err = db.SQL().ExecContext(ctx, `
