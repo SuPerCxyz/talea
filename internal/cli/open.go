@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -43,10 +44,38 @@ func newOpenCmd() *cobra.Command {
 				return err
 			}
 			if !plan.DirExists {
-				fmt.Fprintf(os.Stderr,
-					"无法恢复会话。\n\nAgent：%s\n会话 ID：%s\n原因：原工作目录不存在\n目录：%s\n\n可以执行：\ntalea open %s --cwd <新目录>\n",
-					sess.AgentID, sess.SessionID, plan.TargetDir, sess.SessionID)
-				return exitError{code: ExitNoWorkdir}
+				// 交互处理原目录不存在
+				newTarget, action, err := handleMissingDir(sess, plan.TargetDir, a.Config.PathMapping)
+				if err != nil {
+					return err
+				}
+				switch action {
+				case "cancel":
+					return exitError{code: ExitNoWorkdir, msg: "已取消恢复"}
+				case "view":
+					fmt.Printf("会话 ID：%s\n", sess.SessionID)
+					fmt.Printf("首次提问：%s\n", firstLine(sess.FirstQuestion))
+					return nil
+				case "copy":
+					ad2, _ := a.Registry.Get(sess.AgentID)
+					if resumer, ok := adapters.As[adapters.Resumer](ad2); ok {
+						cmd3, err := resumer.BuildResumeCommand(*sess, plan.TargetDir)
+						if err == nil {
+							fmt.Printf("%s %s\n", cmd3.Program, strings.Join(cmd3.Args, " "))
+						}
+					}
+					return nil
+				case "current":
+					plan.TargetDir, err = os.Getwd()
+					if err != nil {
+						return err
+					}
+				case "mapped":
+					if newTarget != "" {
+						plan.TargetDir = newTarget
+					}
+				}
+				plan.DirExists = dirExists(plan.TargetDir)
 			}
 
 			// 通过适配器构造恢复命令
@@ -136,6 +165,66 @@ func newLastCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+// mapChoice 将用户输入映射为动作。
+func mapChoice(line string) string {
+	switch strings.TrimSpace(line) {
+	case "1":
+		return "mapped"
+	case "2":
+		return "current"
+	case "3":
+		return "view"
+	case "4":
+		return "copy"
+	default:
+		return "cancel"
+	}
+}
+
+// handleMissingDir 交互处理原工作目录不存在的情况。
+// 返回 (映射后的新目录, 选择动作, 错误)。非 TTY 时自动取消。
+func handleMissingDir(sess *model.Session, missingDir string, mappings map[string]string) (string, string, error) {
+	fmt.Fprintf(os.Stderr, "\n原工作目录不存在：\n\n%s\n\n请选择：\n", missingDir)
+	fmt.Fprintln(os.Stderr, "1. 映射到新目录")
+	fmt.Fprintln(os.Stderr, "2. 在当前目录恢复")
+	fmt.Fprintln(os.Stderr, "3. 仅查看会话")
+	fmt.Fprintln(os.Stderr, "4. 复制恢复命令")
+	fmt.Fprintln(os.Stderr, "5. 取消")
+
+	if !isTTY(os.Stdin) {
+		return "", "cancel", nil
+	}
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", "cancel", err
+	}
+	action := mapChoice(line)
+	switch action {
+	case "mapped":
+		fmt.Fprint(os.Stderr, "输入新目录路径：")
+		dirLine, err := reader.ReadString('\n')
+		if err != nil {
+			return "", "cancel", err
+		}
+		dir := strings.TrimSpace(dirLine)
+		if dir == "" {
+			return "", "cancel", nil
+		}
+		return dir, "mapped", nil
+	default:
+		return "", action, nil
+	}
+}
+
+func isTTY(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 // exitError 携带退出码的错误。
