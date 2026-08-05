@@ -63,10 +63,6 @@ func Format(micros int64, currency string) string {
 	whole := micros / 1_000_000
 	frac := micros % 1_000_000
 	symbol := symbolOf(currency)
-	if frac == 0 {
-		return symbol + formatInt(whole)
-	}
-	// 显示两位小数
 	return symbol + formatInt(whole) + "." + pad2(frac/10000)
 }
 

@@ -501,20 +501,20 @@ func (a *Adapter) IterateUsageEvents(
 		}
 		ts := time.UnixMilli(created)
 		ev := &model.UsageTimelineEvent{
-			AgentInstanceID:   s.AgentInstanceID,
-			SessionID:         s.SessionID,
-			EventID:           partID,
-			EventType:         model.UsageEventRequest,
-			Timestamp:         &ts,
-			Sequence:          seq,
-			MessageID:         msgID,
-			InputTokens:       tok.Input,
-			OutputTokens:      tok.Output,
-			TotalTokens:       tok.Total,
-			ReasoningTokens:   tok.Reasoning,
-			Source:            model.UsageSourceMessageMetadata,
-			Completeness:      model.UsageComplete,
-			SourceIdentity:    "opencode-part:" + partID,
+			AgentInstanceID: s.AgentInstanceID,
+			SessionID:       s.SessionID,
+			EventID:         partID,
+			EventType:       model.UsageEventRequest,
+			Timestamp:       &ts,
+			Sequence:        seq,
+			MessageID:       msgID,
+			InputTokens:     tok.Input,
+			OutputTokens:    tok.Output,
+			TotalTokens:     tok.Total,
+			ReasoningTokens: tok.Reasoning,
+			Source:          model.UsageSourceMessageMetadata,
+			Completeness:    model.UsageComplete,
+			SourceIdentity:  "opencode-part:" + partID,
 		}
 		// OpenCode step-finish total 为上下文快照（累计），
 		// input 为本次请求增量。将 total 映射为 ContextAfter 与 CumulativeTotal。

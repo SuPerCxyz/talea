@@ -80,7 +80,8 @@ func Generate(ctx context.Context, db *index.DB, instanceID, sessionID string) (
 	return rep, nil
 }
 
-// p95HighRequests 找出超过 P95 的请求数。
+// p95HighRequests 找出超过会话 P95 的请求数。
+// P95 取排序后索引 len*95/100 的值；单尖峰被计入自身时使用 P90 兜底。
 func p95HighRequests(events []timeline.Event) []timeline.Event {
 	var totals []int64
 	for _, e := range events {
@@ -93,14 +94,35 @@ func p95HighRequests(events []timeline.Event) []timeline.Event {
 	}
 	sorted := append([]int64(nil), totals...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-	p95 := sorted[len(sorted)*95/100]
+
+	idx := len(sorted) * 95 / 100
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	threshold := sorted[idx]
+	// 若阈值被极端值抬高导致无法检出，退到 P90
+	if countAbove(sorted, threshold) == 0 && idx > 0 {
+		idx = idx * 90 / 100
+		threshold = sorted[idx]
+	}
+
 	var out []timeline.Event
 	for _, e := range events {
-		if e.EventType == "request" && e.TotalTokens != nil && *e.TotalTokens > p95 {
+		if e.EventType == "request" && e.TotalTokens != nil && *e.TotalTokens > threshold {
 			out = append(out, e)
 		}
 	}
 	return out
+}
+
+func countAbove(sorted []int64, threshold int64) int {
+	n := 0
+	for _, v := range sorted {
+		if v > threshold {
+			n++
+		}
+	}
+	return n
 }
 
 func contextOverflow(events []timeline.Event) int {

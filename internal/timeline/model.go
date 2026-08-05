@@ -51,10 +51,10 @@ func ByModel(ctx context.Context, db *index.DB, instanceID, sessionID string) ([
 
 // ContextPoint 是上下文窗口曲线上的一个采样点。
 type ContextPoint struct {
-	Timestamp   int64
-	Context     int64
+	Timestamp    int64
+	Context      int64
 	ContextLimit int64
-	Change      int64 // 与上一个采样点的差值
+	Change       int64 // 与上一个采样点的差值
 }
 
 // ContextCurve 生成上下文窗口曲线采样（按 timestamp 排序）。

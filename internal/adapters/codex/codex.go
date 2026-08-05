@@ -520,8 +520,8 @@ func (a *Adapter) IterateUsageEvents(
 		ts, hasTS := parseTime(line.Timestamp)
 		if line.Type == "response_item" {
 			var item struct {
-				Type    string           `json:"type"`
-				Role    string           `json:"role"`
+				Type    string            `json:"type"`
+				Role    string            `json:"role"`
 				Content []json.RawMessage `json:"content"`
 			}
 			_ = json.Unmarshal(line.Payload, &item)
@@ -556,19 +556,19 @@ func (a *Adapter) IterateUsageEvents(
 					continue
 				}
 				e := &model.UsageTimelineEvent{
-					AgentInstanceID:   s.AgentInstanceID,
-					SessionID:         s.SessionID,
-					EventType:         model.UsageEventRequest,
-					Sequence:          seq,
-					InputTokens:       u.InputTokens,
-					OutputTokens:      u.OutputTokens,
-					TotalTokens:       u.TotalTokens,
-					CacheReadTokens:   u.CacheReadTokens,
-					CacheWriteTokens:  u.CacheWriteTokens,
-					ReasoningTokens:   u.ReasoningTokens,
-					Source:            model.UsageSourceMessageMetadata,
-					Completeness:      model.UsageComplete,
-					SourceIdentity:    "codex-req-" + itoa(seq),
+					AgentInstanceID:  s.AgentInstanceID,
+					SessionID:        s.SessionID,
+					EventType:        model.UsageEventRequest,
+					Sequence:         seq,
+					InputTokens:      u.InputTokens,
+					OutputTokens:     u.OutputTokens,
+					TotalTokens:      u.TotalTokens,
+					CacheReadTokens:  u.CacheReadTokens,
+					CacheWriteTokens: u.CacheWriteTokens,
+					ReasoningTokens:  u.ReasoningTokens,
+					Source:           model.UsageSourceMessageMetadata,
+					Completeness:     model.UsageComplete,
+					SourceIdentity:   "codex-req-" + itoa(seq),
 				}
 				if hasTS {
 					e.Timestamp = &ts
