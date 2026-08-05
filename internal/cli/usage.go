@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"github.com/talea/talea/internal/cli/output"
 	"github.com/talea/talea/internal/doctor"
 	"github.com/talea/talea/internal/index"
+	"github.com/talea/talea/internal/insights"
+	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/timeline"
 	"github.com/talea/talea/internal/usage"
 )
@@ -105,12 +108,15 @@ func newUsageCmd() *cobra.Command {
 
 func newTimelineCmd() *cobra.Command {
 	var (
-		agentFlag  string
-		groupBy    string
-		bucket     string
-		aroundPeak bool
-		formatFlag string
-		outputFile string
+		agentFlag    string
+		groupBy      string
+		bucket       string
+		aroundPeak   bool
+		formatFlag   string
+		outputFile   string
+		byModelFlag  bool
+		contextFlag  bool
+		insightsFlag bool
 	)
 	cmd := &cobra.Command{
 		Use:   "timeline <session-id>",
@@ -133,6 +139,17 @@ func newTimelineCmd() *cobra.Command {
 			defer db.Close()
 			if err := db.Migrate(ctx); err != nil {
 				return err
+			}
+
+			// 独立视图优先
+			if byModelFlag {
+				return showByModel(ctx, db, sess, outputFile, formatFlag)
+			}
+			if contextFlag {
+				return showContext(ctx, db, sess, outputFile, formatFlag)
+			}
+			if insightsFlag {
+				return showInsights(ctx, db, sess)
 			}
 
 			events, err := timeline.List(ctx, db, timeline.Query{
@@ -191,7 +208,112 @@ func newTimelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&aroundPeak, "around-peak", false, "峰值附近")
 	cmd.Flags().StringVar(&formatFlag, "format", "table", "输出格式：table/json/csv/markdown")
 	cmd.Flags().StringVar(&outputFile, "output", "", "输出文件")
+	cmd.Flags().BoolVar(&byModelFlag, "by-model", false, "按模型汇总")
+	cmd.Flags().BoolVar(&contextFlag, "context", false, "上下文窗口曲线")
+	cmd.Flags().BoolVar(&insightsFlag, "insights", false, "Token 消耗洞察")
 	return cmd
+}
+
+func showByModel(ctx context.Context, db *index.DB, sess *model.Session, outputFile, formatFlag string) error {
+	sums, err := timeline.ByModel(ctx, db, sess.AgentInstanceID, sess.SessionID)
+	if err != nil {
+		return err
+	}
+	w := os.Stdout
+	if outputFile != "" {
+		f, err := os.Create(outputFile)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	switch output.Format(formatFlag) {
+	case output.FormatJSON:
+		return json.NewEncoder(w).Encode(sums)
+	case output.FormatCSV:
+		cw := csv.NewWriter(w)
+		defer cw.Flush()
+		cw.Write([]string{"model", "requests", "input", "output", "total", "cache_read", "reasoning"})
+		for _, m := range sums {
+			cw.Write([]string{m.Model, fmt.Sprint(m.Requests), fmt.Sprint(m.InputTokens),
+				fmt.Sprint(m.OutputTokens), fmt.Sprint(m.TotalTokens), fmt.Sprint(m.CacheRead), fmt.Sprint(m.Reasoning)})
+		}
+		return nil
+	default:
+		fmt.Fprintf(w, "%-24s  %-8s  %-10s  %-10s  %-10s\n", "模型", "请求", "输入", "输出", "总计")
+		for _, m := range sums {
+			fmt.Fprintf(w, "%-24s  %-8d  %-10s  %-10s  %-10s\n",
+				m.Model, m.Requests, human(m.InputTokens), human(m.OutputTokens), human(m.TotalTokens))
+		}
+		return nil
+	}
+}
+
+func showContext(ctx context.Context, db *index.DB, sess *model.Session, outputFile, formatFlag string) error {
+	pts, err := timeline.ContextCurve(ctx, db, sess.AgentInstanceID, sess.SessionID, 100)
+	if err != nil {
+		return err
+	}
+	if len(pts) == 0 {
+		fmt.Println("没有上下文窗口数据")
+		return nil
+	}
+	w := os.Stdout
+	if outputFile != "" {
+		f, err := os.Create(outputFile)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	comps, _ := timeline.DetectCompactions(ctx, db, sess.AgentInstanceID, sess.SessionID)
+	fmt.Fprintf(w, "上下文窗口曲线（%d 个采样点）：\n\n", len(pts))
+	fmt.Fprintf(w, "%-10s  %-10s  %-10s  %-12s\n", "时间", "上下文", "上限", "变化")
+	for _, p := range pts {
+		fmt.Fprintf(w, "%-10s  %-10s  %-10s  %+s\n",
+			time.Unix(p.Timestamp, 0).Format("15:04:05"),
+			human(p.Context), human(p.ContextLimit), signedHuman(p.Change))
+	}
+	if len(comps) > 0 {
+		fmt.Fprintln(w, "\n上下文压缩：")
+		for _, c := range comps {
+			label := "明确压缩"
+			if c.IsInferred {
+				label = "可能发生上下文压缩"
+			}
+			fmt.Fprintf(w, "  %s：压缩前 %s，压缩后 %s，减少 %s，压缩率 %.1f%%（%s）\n",
+				time.Unix(c.Timestamp, 0).Format("15:04:05"),
+				human(c.Before), human(c.After), human(c.Reduced), c.Ratio*100, label)
+		}
+	}
+	return nil
+}
+
+func showInsights(ctx context.Context, db *index.DB, sess *model.Session) error {
+	rep, err := insights.Generate(ctx, db, sess.AgentInstanceID, sess.SessionID)
+	if err != nil {
+		return err
+	}
+	fmt.Println("会话 Token 洞察\n")
+	if len(rep.Insights) == 0 {
+		fmt.Println("未检测到明显异常消耗模式。")
+		return nil
+	}
+	for _, ins := range rep.Insights {
+		fmt.Printf("- %s\n", ins.Text)
+	}
+	return nil
+}
+
+func signedHuman(n int64) string {
+	sign := "+"
+	if n < 0 {
+		sign = "-"
+		n = -n
+	}
+	return sign + human(n)
 }
 
 func newDoctorCmd() *cobra.Command {
