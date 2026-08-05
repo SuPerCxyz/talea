@@ -88,14 +88,19 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 	}
 
 	var (
-		where []string
-		args  []any
+		where   []string
+		args    []any
+		hasTerm bool
 	)
 	if q.Term != "" {
 		if utf8.RuneCountInString(q.Term) >= 3 {
+			// 3 字以上走 FTS5，带列权重排序（bm25，权重按列序：
+			// session_id=10, first_question=5, working_directory=3,
+			// project_name=2, git_branch=1）
 			where = append(where, `EXISTS(SELECT 1 FROM session_fts f
 				WHERE f.rowid = s.rowid AND session_fts MATCH ?)`)
 			args = append(args, ftsTerm(q.Term))
+			hasTerm = true
 		} else {
 			where = append(where, `(s.session_id = ? OR s.first_question LIKE ? OR s.working_directory LIKE ?)`)
 			args = append(args, q.Term, "%"+q.Term+"%", "%"+q.Term+"%")
@@ -125,6 +130,15 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		where = append(where, `1=1`)
 	}
 
+	// 关键词搜索时按 FTS 相关度排序（列权重），否则按最近活动
+	orderBy := "s.last_activity_at DESC"
+	scoreExpr := "0.0"
+	if hasTerm {
+		orderBy = "score"
+		scoreExpr = `(SELECT bm25(session_fts, 10.0, 5.0, 3.0, 2.0, 1.0)
+		          FROM session_fts f WHERE f.rowid = s.rowid AND session_fts MATCH ?)`
+	}
+
 	query := fmt.Sprintf(`
 		SELECT s.agent_id, s.agent_instance_id, s.session_id,
 		       s.first_question, s.started_at, s.ended_at,
@@ -135,11 +149,16 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		       s.source_size, s.source_offset,
 		       s.format_name, s.format_version,
 		       s.working_dir_exists, s.project_name, s.git_root, s.git_remote,
-		       s.activity_state
+		       s.activity_state,
+		       %s AS score
 		FROM sessions s
 		WHERE %s
-		ORDER BY s.last_activity_at DESC
-		LIMIT ?`, strings.Join(where, " AND "))
+		ORDER BY %s
+		LIMIT ?`,
+		scoreExpr, strings.Join(where, " AND "), orderBy)
+	if hasTerm {
+		args = append(args, ftsTerm(q.Term))
+	}
 	args = append(args, limit)
 
 	rows, err := db.SQL().QueryContext(ctx, query, args...)
@@ -156,6 +175,7 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 			duration             *int64
 			wdExists             int
 			activity             string
+			score                float64
 		)
 		if err := rows.Scan(&s.AgentID, &s.AgentInstanceID, &s.SessionID,
 			&s.FirstQuestion, &started, &ended, &last, &duration,
@@ -165,7 +185,7 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 			&s.SourceSize, &s.SourceOffset,
 			&s.FormatName, &s.FormatVersion,
 			&wdExists, &s.ProjectName, &s.GitRoot, &s.GitRemote,
-			&activity); err != nil {
+			&activity, &score); err != nil {
 			continue
 		}
 		s.WorkingDirExists = wdExists != 0
@@ -202,7 +222,7 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 				s.TokenUsage = u
 			}
 		}
-		out = append(out, Result{Session: s})
+		out = append(out, Result{Session: s, Score: -score}) // bm25 为负分，越小越相关
 	}
 	return out, nil
 }
