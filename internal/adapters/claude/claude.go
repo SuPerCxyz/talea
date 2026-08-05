@@ -43,6 +43,7 @@ func (a *Adapter) Info() model.AdapterInfo {
 			model.CapabilitySubagents,
 			model.CapabilityIncrementalIndex,
 			model.CapabilityTokenSummary,
+			model.CapabilityTokenTimeline,
 		},
 	}
 }
@@ -439,4 +440,154 @@ func (a *Adapter) LoadUsage(ctx context.Context, s model.Session) (*model.TokenU
 		return s.TokenUsage, nil
 	}
 	return nil, nil
+}
+
+// IterateUsageEvents 从 JSONL 提取时间线事件。
+// user 消息生成 user_message 事件；assistant 消息带 usage 生成 request 事件。
+func (a *Adapter) IterateUsageEvents(
+	ctx context.Context,
+	s model.Session,
+) (adapters.UsageEventIterator, error) {
+	r, err := extract.OpenJSONL(s.SourcePath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	var events []*model.UsageTimelineEvent
+	seq := int64(0)
+	for {
+		o, ok, err := r.Next()
+		if err != nil {
+			continue
+		}
+		if !ok {
+			break
+		}
+		var line jsonLine
+		if b, err := json.Marshal(o); err == nil {
+			if err := json.Unmarshal(b, &line); err != nil {
+				continue
+			}
+		}
+		ts, hasTS := parseTime(line.Timestamp)
+		if line.Type == "user" {
+			preview, hasQ := questionFromLine(&line)
+			if !hasQ {
+				preview = ""
+			}
+			ev := &model.UsageTimelineEvent{
+				AgentInstanceID:   s.AgentInstanceID,
+				SessionID:         s.SessionID,
+				EventID:           "claude-user-" + itoa(seq),
+				EventType:         model.UsageEventUserMessage,
+				Sequence:          seq,
+				UserPromptPreview: preview,
+				Source:            model.UsageSourceMessageMetadata,
+				Completeness:      model.UsageMissing,
+				SourceIdentity:    "claude-msg-" + itoa(seq) + "-user",
+			}
+			if hasTS {
+				ev.Timestamp = &ts
+			}
+			events = append(events, ev)
+			seq++
+			continue
+		}
+		if line.Type == "assistant" {
+			u := parseUsage(line.Message)
+			if u == nil {
+				continue
+			}
+			ev := &model.UsageTimelineEvent{
+				AgentInstanceID: s.AgentInstanceID,
+				SessionID:       s.SessionID,
+				EventType:       model.UsageEventRequest,
+				Sequence:        seq,
+				InputTokens:     u.InputTokens,
+				OutputTokens:    u.OutputTokens,
+				TotalTokens:     u.TotalTokens,
+				Source:          model.UsageSourceMessageMetadata,
+				Completeness:    model.UsageComplete,
+				SourceIdentity:  "claude-req-" + itoa(seq),
+			}
+			if hasTS {
+				ev.Timestamp = &ts
+			}
+			events = append(events, ev)
+			seq++
+		}
+	}
+	return &eventIterator{events: events}, nil
+}
+
+type eventIterator struct {
+	events []*model.UsageTimelineEvent
+	idx    int
+}
+
+func (it *eventIterator) Next() (*model.UsageTimelineEvent, bool, error) {
+	if it.idx >= len(it.events) {
+		return nil, false, nil
+	}
+	e := it.events[it.idx]
+	it.idx++
+	return e, true, nil
+}
+
+func (it *eventIterator) Close() error { return nil }
+
+func itoa(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	pos := len(buf)
+	for n > 0 {
+		pos--
+		buf[pos] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[pos:])
+}
+
+// ResolveSessionRelations 通过 subagents/ 目录推断父子关系。
+// 子会话文件路径 <projectDir>/<parentId>/subagents/agent-<id>.jsonl，
+// 父会话 ID 从路径父目录得出。
+func (a *Adapter) ResolveSessionRelations(
+	ctx context.Context,
+	sessions []model.Session,
+) ([]model.SessionRelation, error) {
+	var out []model.SessionRelation
+	for _, s := range sessions {
+		if s.SourcePath == "" {
+			continue
+		}
+		// 子会话文件位于 <parentDir>/<parentId>/subagents/<file>.jsonl
+		parts := strings.Split(filepath.ToSlash(s.SourcePath), "/")
+		if len(parts) < 2 {
+			continue
+		}
+		subagentsIdx := -1
+		for i := len(parts) - 1; i >= 0; i-- {
+			if parts[i] == "subagents" {
+				subagentsIdx = i
+				break
+			}
+		}
+		if subagentsIdx <= 0 {
+			continue
+		}
+		parentID := parts[subagentsIdx-1]
+		if parentID == "" || parentID == s.SessionID {
+			continue
+		}
+		out = append(out, model.SessionRelation{
+			ParentAgentInstanceID: s.AgentInstanceID,
+			ParentSessionID:       parentID,
+			ChildAgentInstanceID:  s.AgentInstanceID,
+			ChildSessionID:        s.SessionID,
+		})
+	}
+	return out, nil
 }

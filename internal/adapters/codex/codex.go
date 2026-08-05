@@ -42,6 +42,7 @@ func (a *Adapter) Info() model.AdapterInfo {
 			model.CapabilityWorkingDirectory,
 			model.CapabilityIncrementalIndex,
 			model.CapabilityTokenSummary,
+			model.CapabilityTokenTimeline,
 		},
 	}
 }
@@ -486,4 +487,126 @@ func (a *Adapter) LoadUsage(ctx context.Context, s model.Session) (*model.TokenU
 		return s.TokenUsage, nil
 	}
 	return nil, nil
+}
+
+// IterateUsageEvents 从 rollout JSONL 提取时间线事件。
+// user 消息生成 user_message 事件；token_count 事件生成 request 事件。
+func (a *Adapter) IterateUsageEvents(
+	ctx context.Context,
+	s model.Session,
+) (adapters.UsageEventIterator, error) {
+	r, err := extract.OpenJSONL(s.SourcePath)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	var events []*model.UsageTimelineEvent
+	seq := int64(0)
+	for {
+		o, ok, err := r.Next()
+		if err != nil {
+			continue
+		}
+		if !ok {
+			break
+		}
+		var line rolloutLine
+		if b, err := json.Marshal(o); err == nil {
+			if err := json.Unmarshal(b, &line); err != nil {
+				continue
+			}
+		}
+		ts, hasTS := parseTime(line.Timestamp)
+		if line.Type == "response_item" {
+			var item struct {
+				Type    string           `json:"type"`
+				Role    string           `json:"role"`
+				Content []json.RawMessage `json:"content"`
+			}
+			_ = json.Unmarshal(line.Payload, &item)
+			if item.Type == "message" && item.Role == "user" {
+				q, _ := userQuestion(item.Content)
+				ev := &model.UsageTimelineEvent{
+					AgentInstanceID:   s.AgentInstanceID,
+					SessionID:         s.SessionID,
+					EventType:         model.UsageEventUserMessage,
+					Sequence:          seq,
+					UserPromptPreview: q,
+					Source:            model.UsageSourceMessageMetadata,
+					Completeness:      model.UsageMissing,
+					SourceIdentity:    "codex-msg-" + itoa(seq),
+				}
+				if hasTS {
+					ev.Timestamp = &ts
+				}
+				events = append(events, ev)
+				seq++
+			}
+		}
+		if line.Type == "event_msg" {
+			var ev struct {
+				Type string          `json:"type"`
+				Info json.RawMessage `json:"info"`
+			}
+			_ = json.Unmarshal(line.Payload, &ev)
+			if ev.Type == "token_count" {
+				u := parseTokenCount(ev.Info)
+				if u == nil {
+					continue
+				}
+				e := &model.UsageTimelineEvent{
+					AgentInstanceID:   s.AgentInstanceID,
+					SessionID:         s.SessionID,
+					EventType:         model.UsageEventRequest,
+					Sequence:          seq,
+					InputTokens:       u.InputTokens,
+					OutputTokens:      u.OutputTokens,
+					TotalTokens:       u.TotalTokens,
+					CacheReadTokens:   u.CacheReadTokens,
+					CacheWriteTokens:  u.CacheWriteTokens,
+					ReasoningTokens:   u.ReasoningTokens,
+					Source:            model.UsageSourceMessageMetadata,
+					Completeness:      model.UsageComplete,
+					SourceIdentity:    "codex-req-" + itoa(seq),
+				}
+				if hasTS {
+					e.Timestamp = &ts
+				}
+				events = append(events, e)
+				seq++
+			}
+		}
+	}
+	return &eventIterator{events: events}, nil
+}
+
+type eventIterator struct {
+	events []*model.UsageTimelineEvent
+	idx    int
+}
+
+func (it *eventIterator) Next() (*model.UsageTimelineEvent, bool, error) {
+	if it.idx >= len(it.events) {
+		return nil, false, nil
+	}
+	e := it.events[it.idx]
+	it.idx++
+	return e, true, nil
+}
+
+func (it *eventIterator) Close() error { return nil }
+
+func itoa(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	pos := len(buf)
+	for n > 0 {
+		pos--
+		buf[pos] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[pos:])
 }

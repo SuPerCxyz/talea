@@ -354,6 +354,32 @@ func ptrOrNil(p *int64) any {
 	return *p
 }
 
+// AggregateChildTokens 将子会话总 Token 聚合到父会话的
+// direct_child_tokens / descendant_tokens。返回是否更新。
+func (db *DB) AggregateChildTokens(ctx context.Context, rel model.SessionRelation) error {
+	var childTotal sql.NullInt64
+	err := db.sql.QueryRowContext(ctx,
+		`SELECT total_tokens FROM session_usage WHERE agent_instance_id=? AND session_id=?`,
+		rel.ChildAgentInstanceID, rel.ChildSessionID).Scan(&childTotal)
+	if err != nil {
+		return err // 子会话无 usage，忽略
+	}
+	if !childTotal.Valid {
+		return nil
+	}
+	_, err = db.sql.ExecContext(ctx, `
+		INSERT INTO session_usage (
+			agent_instance_id, session_id, direct_child_tokens, descendant_tokens, updated_at
+		) VALUES (?,?,?,?,?)
+		ON CONFLICT(agent_instance_id, session_id) DO UPDATE SET
+			direct_child_tokens = COALESCE(direct_child_tokens, 0) + excluded.direct_child_tokens,
+			descendant_tokens = COALESCE(descendant_tokens, 0) + excluded.descendant_tokens,
+			updated_at = excluded.updated_at`,
+		rel.ParentAgentInstanceID, rel.ParentSessionID,
+		childTotal.Int64, childTotal.Int64, time.Now().Unix())
+	return err
+}
+
 func toEpoch(t *time.Time) any {
 	if t == nil {
 		return nil

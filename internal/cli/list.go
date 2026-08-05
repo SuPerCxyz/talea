@@ -195,6 +195,12 @@ func newIndexCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if !metadataOnly {
+				ix := &index.Indexer{App: a, DB: db}
+				if n, err := ix.ResolveSubagentRelations(ctx); err == nil && n > 0 {
+					fmt.Fprintf(os.Stdout, "子 Agent 聚合：%d 条关系\n", n)
+				}
+			}
 			for _, r := range results {
 				status := "OK"
 				if r.Errors > 0 {
