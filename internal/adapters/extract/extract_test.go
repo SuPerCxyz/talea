@@ -16,6 +16,13 @@ func TestStripInjectedContent(t *testing.T) {
 		{"env context block", "<environment_context>\n<cwd>/x</cwd>\n</environment_context>\n提问", "提问"},
 		{"plain text unchanged", "正常提问内容", "正常提问内容"},
 		{"empty", "", ""},
+		{"ansi color", "\x1b[31m红色提问\x1b[0m", "红色提问"},
+		{"ansi cursor", "分析\x1b[2J\x1b[H残留原因", "分析残留原因"},
+		{"ansi osc", "\x1b]0;title\x07真实问题", "真实问题"},
+		{"command only", "ls -la", "ls -la"},
+		{"image reference", "看下这张图：@path/to/img.png", "看下这张图：@path/to/img.png"},
+		{"file reference", "分析 src/main.go 的 bug", "分析 src/main.go 的 bug"},
+		{"mixed ansi+inject", "<system-reminder>x</system-reminder>\x1b[31m真实\x1b[0m提问", "真实提问"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

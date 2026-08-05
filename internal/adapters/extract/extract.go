@@ -16,6 +16,14 @@ var injectedPrefixes = []string{
 	"# CLAUDE.md instructions",
 }
 
+// ansiEscapeRE 匹配 ANSI/终端控制序列。
+var ansiEscapeRE = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[0-9]`)
+
+// StripANSI 移除 ANSI 控制序列。
+func StripANSI(s string) string {
+	return ansiEscapeRE.ReplaceAllString(s, "")
+}
+
 // systemReminderRE 匹配 `<system-reminder>...</system-reminder>` 整块。
 var systemReminderRE = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
 
@@ -28,7 +36,7 @@ var envContextBlockRE = regexp.MustCompile(`(?s)<environment_context>.*?</enviro
 // agentsHeaderRE 匹配 "# AGENTS.md instructions ..." 单行标题。
 var agentsHeaderRE = regexp.MustCompile(`(?m)^#?\s*(AGENTS\.md|CLAUDE\.md)\s+instructions.*$\n?`)
 
-// StripInjectedContent 移除系统提醒、环境上下文、AGENTS 指令注入块。
+// StripInjectedContent 移除系统提醒、环境上下文、AGENTS 指令注入块与 ANSI 序列。
 // 返回清理后的文本。保留用户原始表达。
 func StripInjectedContent(s string) string {
 	if s == "" {
@@ -39,6 +47,7 @@ func StripInjectedContent(s string) string {
 	out = instructionsBlockRE.ReplaceAllString(out, "")
 	out = envContextBlockRE.ReplaceAllString(out, "")
 	out = agentsHeaderRE.ReplaceAllString(out, "")
+	out = ansiEscapeRE.ReplaceAllString(out, "")
 	return strings.TrimSpace(out)
 }
 

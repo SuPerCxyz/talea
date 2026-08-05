@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -93,6 +94,46 @@ func TestParseMetadataMissingFile(t *testing.T) {
 	inst := model.AgentInstance{InstanceID: "t", AgentID: model.AgentClaudeCode}
 	if _, err := a.ParseMetadata(ctx, inst, src); err == nil {
 		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestFirstQuestionCommandOnly(t *testing.T) {
+	// 首次提问只有命令，应保留
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cmd.jsonl")
+	content := `{"type":"user","timestamp":"2026-07-17T04:57:32.179Z","cwd":"/x","sessionId":"cmd-s","message":{"role":"user","content":"ls -la /var/log"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	a := New()
+	src := adapters.SessionSource{SessionID: "cmd-s", Path: path}
+	s, err := a.ParseMetadata(ctx, model.AgentInstance{InstanceID: "t", AgentID: model.AgentClaudeCode}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.FirstQuestion != "ls -la /var/log" {
+		t.Fatalf("first question: %q", s.FirstQuestion)
+	}
+}
+
+func TestFirstQuestionANSI(t *testing.T) {
+	// 首次提问含 ANSI 控制字符，应清理
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ansi.jsonl")
+	content := `{"type":"user","timestamp":"2026-07-17T04:57:32.179Z","cwd":"/x","sessionId":"ansi-s","message":{"role":"user","content":"\u001b[31m分析\u001b[0m残留原因"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	a := New()
+	src := adapters.SessionSource{SessionID: "ansi-s", Path: path}
+	s, err := a.ParseMetadata(ctx, model.AgentInstance{InstanceID: "t", AgentID: model.AgentClaudeCode}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.FirstQuestion != "分析残留原因" {
+		t.Fatalf("first question: %q", s.FirstQuestion)
 	}
 }
 
