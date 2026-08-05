@@ -42,6 +42,8 @@ func (d *detailModel) render() string {
 		return d.renderContext()
 	case "model":
 		return d.renderModel()
+	case "turns":
+		return d.renderTurns()
 	case "preview":
 		return d.renderPreview()
 	default:
@@ -170,6 +172,37 @@ func (d *detailModel) renderPreview() string {
 	return sb.String()
 }
 
+// renderTurns 渲染用户轮次聚合。
+func (d *detailModel) renderTurns() string {
+	if d.db == nil {
+		return "数据库不可用"
+	}
+	turns, err := timeline.GroupByTurns(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID)
+	if err != nil {
+		return "加载轮次失败：" + err.Error()
+	}
+	if len(turns) == 0 {
+		return "该会话没有可聚合的轮次"
+	}
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("用户轮次") + "\n\n")
+	sb.WriteString(fmt.Sprintf("%-5s  %-30s  %-6s  %-10s\n", "轮次", "提问", "请求", "Token"))
+	for _, t := range turns {
+		sb.WriteString(fmt.Sprintf("%-5d  %-30s  %-6d  %-10s\n",
+			t.Index, truncRunes(t.Prompt, 28), t.Requests, humanNum(t.Total)))
+	}
+	sb.WriteString("\n按 h 返回详情")
+	return sb.String()
+}
+
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 func timelineDesc(e timeline.Event) string {
 	var parts []string
 	if e.TotalTokens != nil {
@@ -247,7 +280,7 @@ func (d *detailModel) renderDetail() string {
 		sb.WriteString("\n当前 Agent 会话格式未提供 Token 使用数据\n")
 	}
 
-	sb.WriteString("\n\n" + labelStyle.Render("按键：t 时间线  c 上下文  m 模型  o 恢复  esc 返回  q 退出"))
+	sb.WriteString("\n\n" + labelStyle.Render("按键：t 时间线  c 上下文  m 模型  r 轮次  p 预览  o 恢复  esc 返回  q 退出"))
 	return sb.String()
 }
 

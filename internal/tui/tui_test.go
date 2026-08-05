@@ -73,6 +73,10 @@ func TestDetailRenderEmptyDB(t *testing.T) {
 	if d.render() == "" {
 		t.Fatal("empty model render")
 	}
+	d.tab = "turns"
+	if d.render() == "" {
+		t.Fatal("empty turns render")
+	}
 	d.tab = ""
 	if d.render() == "" {
 		t.Fatal("empty detail render")
