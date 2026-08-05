@@ -16,6 +16,10 @@ type Indexer struct {
 	App   *app.App
 	DB    *DB
 	Force bool // 全量重建（忽略增量跳过）
+
+	// Instances 可选：注入固定的 Agent 实例列表（测试用）。
+	// 为空时通过 App.DetectInstances 探测。
+	Instances []model.AgentInstance
 }
 
 // Result 是单 Agent 的索引结果。
@@ -37,6 +41,9 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 	insts, err := ix.App.DetectInstances(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if len(ix.Instances) > 0 {
+		insts = ix.Instances
 	}
 
 	var out []Result

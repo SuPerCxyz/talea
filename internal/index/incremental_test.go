@@ -78,7 +78,15 @@ func TestIndexAppendTruncateReplace(t *testing.T) {
 	})
 
 	runIndex := func() []index.Result {
-		res, err := (&index.Indexer{App: a, DB: db}).Run(ctx)
+		ix := &index.Indexer{App: a, DB: db}
+		// 注入 fixture 实例，避免依赖真实 Agent 安装（CI runner 无 claude/codex）
+		ix.Instances = []model.AgentInstance{
+			{InstanceID: "claude-test", AgentID: model.AgentClaudeCode,
+				DataDirectory: filepath.Join(home, ".claude")},
+			{InstanceID: "codex-test", AgentID: model.AgentCodexCLI,
+				DataDirectory: filepath.Join(home, ".codex")},
+		}
+		res, err := ix.Run(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,6 +95,9 @@ func TestIndexAppendTruncateReplace(t *testing.T) {
 
 	// 1) 初次索引：新增 1
 	res := runIndex()
+	if len(res) == 0 {
+		t.Fatal("index returned no results")
+	}
 	if res[0].Added != 1 {
 		t.Fatalf("first index added=%d", res[0].Added)
 	}
@@ -154,7 +165,12 @@ func TestSameSessionIDAcrossAgents(t *testing.T) {
 	os.WriteFile(filepath.Join(cxDir, "rollout-2026-07-08T12-00-00-same-id-1.jsonl"),
 		[]byte(cxFile+"\n"), 0o644)
 
-	res, err := (&index.Indexer{App: a, DB: db}).Run(ctx)
+	res, err := (&index.Indexer{App: a, DB: db, Instances: []model.AgentInstance{
+		{InstanceID: "claude-test", AgentID: model.AgentClaudeCode,
+			DataDirectory: filepath.Join(home, ".claude")},
+		{InstanceID: "codex-test", AgentID: model.AgentCodexCLI,
+			DataDirectory: filepath.Join(home, ".codex")},
+	}}).Run(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
