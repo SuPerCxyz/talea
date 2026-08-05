@@ -117,3 +117,12 @@ type ActivityDetector interface {
 		session model.Session,
 	) (model.ActivityState, error)
 }
+
+// ErrInvalidPlugin 表示外部适配器返回无效信息。
+type ErrInvalidPlugin struct {
+	Path string
+}
+
+func (e *ErrInvalidPlugin) Error() string {
+	return "外部适配器未返回有效信息: " + e.Path
+}

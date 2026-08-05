@@ -17,6 +17,8 @@ import (
 	"github.com/talea/talea/internal/adapters/opencode"
 	"github.com/talea/talea/internal/config"
 	"github.com/talea/talea/internal/model"
+	"github.com/talea/talea/internal/plugadapt"
+	"github.com/talea/talea/internal/plugin"
 )
 
 // App 是业务编排入口。
@@ -37,7 +39,22 @@ func New(ctx context.Context) (*App, error) {
 	if err := registerBuiltins(reg); err != nil {
 		return nil, err
 	}
+	registerPlugins(ctx, reg)
 	return &App{Registry: reg, Config: cfg, Paths: paths}, nil
+}
+
+// registerPlugins 注册 PATH 中的外部适配器。
+// 插件加载失败不影响内置适配器。
+func registerPlugins(ctx context.Context, reg *adapters.Registry) {
+	for _, path := range plugin.DiscoverPlugins() {
+		ad, err := plugadapt.New(path)
+		if err != nil {
+			continue
+		}
+		if err := reg.Register(ad); err != nil {
+			_ = ad.Close()
+		}
+	}
 }
 
 // DetectInstances 探测全部已启用 Agent 的实例。
