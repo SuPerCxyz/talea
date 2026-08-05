@@ -112,11 +112,13 @@ func nn(v sql.NullInt64) *int64 {
 
 // Summary 是时间线聚合汇总。
 type Summary struct {
-	RequestCount  int64
-	TotalTokens   int64
-	InputTokens   int64
-	OutputTokens  int64
-	PeakContext   int64
+	RequestCount int64
+	TotalTokens  int64
+	InputTokens  int64
+	OutputTokens int64
+	PeakContext  int64
+	// 会话级真实累计（取最后一个事件的累计值，若存在）
+	CumulativeTotal int64
 }
 
 // Aggregate 聚合指定会话的请求级 usage。
@@ -130,5 +132,17 @@ func Aggregate(ctx context.Context, db *index.DB, instanceID, sessionID string) 
 		FROM usage_timeline_events
 		WHERE agent_instance_id=? AND session_id=?`, instanceID, sessionID)
 	err := row.Scan(&s.RequestCount, &s.TotalTokens, &s.InputTokens, &s.OutputTokens, &s.PeakContext)
-	return s, err
+	if err != nil {
+		return s, err
+	}
+	// 会话真实累计：取最后一条 request 事件的总计（OpenCode step-finish 为上下文快照）
+	var lastTotal sql.NullInt64
+	row = db.SQL().QueryRowContext(ctx, `
+		SELECT total_tokens FROM usage_timeline_events
+		WHERE agent_instance_id=? AND session_id=? AND event_type='request'
+		ORDER BY timestamp DESC, sequence DESC LIMIT 1`, instanceID, sessionID)
+	if err := row.Scan(&lastTotal); err == nil && lastTotal.Valid {
+		s.CumulativeTotal = lastTotal.Int64
+	}
+	return s, nil
 }

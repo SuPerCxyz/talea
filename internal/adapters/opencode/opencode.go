@@ -406,3 +406,163 @@ func (a *Adapter) LoadUsage(ctx context.Context, s model.Session) (*model.TokenU
 	}
 	return nil, nil
 }
+
+// IterateUsageEvents 从 message/part 表提取时间线事件。
+// user 消息生成 user_message 事件；step-finish 生成 request 事件（携带 tokens）。
+// source_identity 使用 message_id / part_id 保证幂等去重。
+func (a *Adapter) IterateUsageEvents(
+	ctx context.Context,
+	s model.Session,
+) (adapters.UsageEventIterator, error) {
+	db, err := openRO(s.SourcePath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	var events []*model.UsageTimelineEvent
+	seq := int64(0)
+
+	// 1) user 消息事件
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, time_created, json_extract(data, '$.role')
+		 FROM message WHERE session_id=? ORDER BY time_created ASC, id ASC`, s.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var (
+			msgID string
+			created int64
+			role  string
+		)
+		if err := rows.Scan(&msgID, &created, &role); err != nil {
+			continue
+		}
+		if role != "user" {
+			continue
+		}
+		ts := time.UnixMilli(created)
+		preview := a.messagePreview(ctx, db, msgID)
+		events = append(events, &model.UsageTimelineEvent{
+			AgentInstanceID:   s.AgentInstanceID,
+			SessionID:         s.SessionID,
+			EventID:           "msg-" + msgID,
+			EventType:         model.UsageEventUserMessage,
+			Timestamp:         &ts,
+			Sequence:          seq,
+			MessageID:         msgID,
+			Source:            model.UsageSourceMessageMetadata,
+			Completeness:      model.UsageComplete,
+			UserPromptPreview: preview,
+			SourceIdentity:    "opencode-msg:" + msgID,
+		})
+		seq++
+	}
+	rows.Close()
+
+	// 2) step-finish request 事件
+	rows2, err := db.QueryContext(ctx,
+		`SELECT p.id, p.message_id, p.time_created, p.data
+		 FROM part p
+		 WHERE p.session_id = ?
+		 ORDER BY p.time_created ASC, p.id ASC`, s.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows2.Close()
+	for rows2.Next() {
+		var (
+			partID, msgID string
+			created       int64
+			raw           string
+		)
+		if err := rows2.Scan(&partID, &msgID, &created, &raw); err != nil {
+			continue
+		}
+		var p struct {
+			Type   string          `json:"type"`
+			Tokens json.RawMessage `json:"tokens"`
+		}
+		if err := json.Unmarshal([]byte(raw), &p); err != nil {
+			continue
+		}
+		if p.Type != "step-finish" {
+			continue
+		}
+		var tok struct {
+			Total     *int64 `json:"total"`
+			Input     *int64 `json:"input"`
+			Output    *int64 `json:"output"`
+			Reasoning *int64 `json:"reasoning"`
+		}
+		if err := json.Unmarshal(p.Tokens, &tok); err != nil {
+			continue
+		}
+		ts := time.UnixMilli(created)
+		events = append(events, &model.UsageTimelineEvent{
+			AgentInstanceID: s.AgentInstanceID,
+			SessionID:       s.SessionID,
+			EventID:         partID,
+			EventType:       model.UsageEventRequest,
+			Timestamp:       &ts,
+			Sequence:        seq,
+			MessageID:       msgID,
+			InputTokens:     tok.Input,
+			OutputTokens:    tok.Output,
+			TotalTokens:     tok.Total,
+			ReasoningTokens: tok.Reasoning,
+			Source:          model.UsageSourceMessageMetadata,
+			Completeness:    model.UsageComplete,
+			SourceIdentity:  "opencode-part:" + partID,
+		})
+		seq++
+	}
+	return &eventIterator{events: events}, nil
+}
+
+// messagePreview 提取消息文本摘要。
+func (a *Adapter) messagePreview(ctx context.Context, db *sql.DB, msgID string) string {
+	rows, err := db.QueryContext(ctx,
+		`SELECT data FROM part WHERE message_id=? AND json_extract(data,'$.type')='text'
+		 ORDER BY time_created ASC`, msgID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	var texts []string
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			continue
+		}
+		var p struct {
+			Text string `json:"text"`
+		}
+		if json.Unmarshal([]byte(raw), &p) == nil && p.Text != "" {
+			texts = append(texts, p.Text)
+		}
+	}
+	joined := strings.Join(texts, "\n")
+	runes := []rune(joined)
+	if len(runes) > 200 {
+		return string(runes[:200])
+	}
+	return joined
+}
+
+type eventIterator struct {
+	events []*model.UsageTimelineEvent
+	idx    int
+}
+
+func (it *eventIterator) Next() (*model.UsageTimelineEvent, bool, error) {
+	if it.idx >= len(it.events) {
+		return nil, false, nil
+	}
+	e := it.events[it.idx]
+	it.idx++
+	return e, true, nil
+}
+
+func (it *eventIterator) Close() error { return nil }

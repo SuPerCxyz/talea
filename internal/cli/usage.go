@@ -1,12 +1,17 @@
 package cli
 
 import (
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/cli/output"
 	"github.com/talea/talea/internal/doctor"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/timeline"
@@ -144,22 +149,39 @@ func newTimelineCmd() *cobra.Command {
 			}
 
 			summary, _ := timeline.Aggregate(ctx, db, sess.AgentInstanceID, sess.SessionID)
-			fmt.Printf("会话：%s  请求：%d  总计：%s  上下文峰值：%s\n",
-				sess.SessionID, summary.RequestCount, human(summary.TotalTokens), human(summary.PeakContext))
-			fmt.Println()
+			writer := os.Stdout
+			var f *os.File
+			if outputFile != "" {
+				f, err = os.Create(outputFile)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				writer = f
+			}
+			fmt.Fprintf(writer, "会话：%s  请求：%d  累计总计：%s  上下文峰值：%s\n",
+				sess.SessionID, summary.RequestCount,
+				humanP(summary.CumulativeTotal), humanP(summary.PeakContext))
+			fmt.Fprintln(writer)
 
 			switch groupBy {
-			case "turn", "request", "":
-				for _, e := range events {
-					fmt.Printf("%s  %-18s  %s\n", fmtTS(e.Timestamp), string(e.EventType), describeEvent(e))
+			case "turn":
+				turns, err := timeline.GroupByTurns(ctx, db, sess.AgentInstanceID, sess.SessionID)
+				if err != nil {
+					return err
+				}
+				if err := writeTurns(writer, turns, output.Format(formatFlag)); err != nil {
+					return err
+				}
+			case "request", "":
+				if err := writeEvents(writer, events, output.Format(formatFlag)); err != nil {
+					return err
 				}
 			default:
 				return fmt.Errorf("不支持的 group-by：%s", groupBy)
 			}
 			_ = bucket
 			_ = aroundPeak
-			_ = formatFlag
-			_ = outputFile
 			return nil
 		},
 	}
@@ -271,5 +293,87 @@ func joinParts(parts []string) string {
 		out += p
 	}
 	return out
+}
+
+// writeEvents 输出请求级时间线。
+func writeEvents(w io.Writer, events []timeline.Event, format output.Format) error {
+	switch format {
+	case output.FormatJSON:
+		views := make([]map[string]any, 0, len(events))
+		for _, e := range events {
+			views = append(views, map[string]any{
+				"time":     fmtTS(e.Timestamp),
+				"type":     string(e.EventType),
+				"model":    e.Model,
+				"total":    ptrValue(e.TotalTokens),
+				"input":    ptrValue(e.InputTokens),
+				"output":   ptrValue(e.OutputTokens),
+				"reasoning": ptrValue(e.ReasoningTokens),
+			})
+		}
+		return json.NewEncoder(w).Encode(views)
+	case output.FormatCSV:
+		cw := csv.NewWriter(w)
+		defer cw.Flush()
+		cw.Write([]string{"time", "type", "model", "total", "input", "output", "reasoning"})
+		for _, e := range events {
+			cw.Write([]string{fmtTS(e.Timestamp), string(e.EventType), e.Model,
+				intStr(e.TotalTokens), intStr(e.InputTokens), intStr(e.OutputTokens), intStr(e.ReasoningTokens)})
+		}
+		return nil
+	default:
+		for _, e := range events {
+			fmt.Fprintf(w, "%s  %-18s  %s\n", fmtTS(e.Timestamp), string(e.EventType), describeEvent(e))
+		}
+		return nil
+	}
+}
+
+// writeTurns 输出用户轮次聚合。
+func writeTurns(w io.Writer, turns []timeline.TurnUsage, format output.Format) error {
+	switch format {
+	case output.FormatJSON:
+		return json.NewEncoder(w).Encode(turns)
+	case output.FormatCSV:
+		cw := csv.NewWriter(w)
+		defer cw.Flush()
+		cw.Write([]string{"turn", "prompt", "started_at", "ended_at", "requests", "total", "input", "output", "reasoning"})
+		for _, t := range turns {
+			cw.Write([]string{fmt.Sprint(t.Index), t.Prompt,
+				t.StartedAt.Format("15:04:05"), t.EndedAt.Format("15:04:05"),
+				fmt.Sprint(t.Requests), fmt.Sprint(t.Total), fmt.Sprint(t.Input),
+				fmt.Sprint(t.Output), fmt.Sprint(t.Reasoning)})
+		}
+		return nil
+	default:
+		fmt.Fprintf(w, "%-5s  %-40s  %-8s  %-6s  %-6s  %s\n",
+			"轮次", "提问", "请求", "工具", "Token", "")
+		for _, t := range turns {
+			fmt.Fprintf(w, "%-5d  %-40s  %-8d  %-6d  %s\n",
+				t.Index, preview(t.Prompt), t.Requests, 0, human(t.Total))
+		}
+		return nil
+	}
+}
+
+func humanP(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	return human(n)
+}
+
+func ptrValue(p *int64) any {
+	if p == nil {
+		return nil
+	}
+	return *p
+}
+
+func intStr(p *int64) string {
+	if p == nil {
+		return ""
+	}
+	return fmt.Sprint(*p)
 }
 

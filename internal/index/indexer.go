@@ -85,10 +85,43 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 			for _, e := range st.Errs {
 				res.ErrorMsgs = append(res.ErrorMsgs, e.Error())
 			}
+			// 时间线事件（独立于会话批处理，单个会话失败不中止）
+			for _, sess := range batch {
+				if err := ix.indexTimelineEvents(ctx, sess, ad); err != nil {
+					res.Errors++
+					res.ErrorMsgs = append(res.ErrorMsgs, fmt.Sprintf("%s/%s timeline: %v", inst.AgentID, sess.SessionID, err))
+				}
+			}
 		}
 		out = append(out, res)
 	}
 	return out, nil
+}
+
+// indexTimelineEvents 索引会话的时间线事件。
+func (ix *Indexer) indexTimelineEvents(ctx context.Context, sess *model.Session, ad adapters.Adapter) error {
+	prov, ok := adapters.As[adapters.UsageTimelineProvider](ad)
+	if !ok {
+		return nil
+	}
+	it, err := prov.IterateUsageEvents(ctx, *sess)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for {
+		e, ok, err := it.Next()
+		if err != nil {
+			return err
+		}
+		if !ok {
+			break
+		}
+		if _, err := ix.DB.UpsertTimelineEvent(ctx, e); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 var _ = adapters.Command{}
