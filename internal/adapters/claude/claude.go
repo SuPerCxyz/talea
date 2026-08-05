@@ -86,42 +86,49 @@ func (a *Adapter) Detect(ctx context.Context) ([]model.AgentInstance, error) {
 	return []model.AgentInstance{inst}, nil
 }
 
-// Discover 发现 projects 目录下的会话文件。
+// Discover 发现 projects 目录下的会话文件（含 subagents 子目录）。
 func (a *Adapter) Discover(ctx context.Context, inst model.AgentInstance) ([]adapters.SessionSource, error) {
 	projectsDir := filepath.Join(inst.DataDirectory, "projects")
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
+	if _, err := os.Stat(projectsDir); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	var out []adapters.SessionSource
-	for _, dir := range entries {
-		if !dir.IsDir() {
-			continue
-		}
-		files, err := os.ReadDir(filepath.Join(projectsDir, dir.Name()))
+	err := filepath.WalkDir(projectsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			continue
+			return nil
 		}
-		for _, f := range files {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
-				continue
-			}
-			info, err := f.Info()
-			if err != nil {
-				continue
-			}
-			sessionID := strings.TrimSuffix(f.Name(), ".jsonl")
-			out = append(out, adapters.SessionSource{
-				SessionID: sessionID,
-				Path:      filepath.Join(projectsDir, dir.Name(), f.Name()),
-				SourceID:  sessionID,
-				Mtime:     info.ModTime().Unix(),
-				Size:      info.Size(),
-			})
+		if d.IsDir() {
+			// 跳过非 JSONL 相关的深层目录（如 subagents 内的其他内容）
+			return nil
 		}
+		if !strings.HasSuffix(d.Name(), ".jsonl") {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		// sessionId 从文件内容读取更可靠，这里先用文件名（ParseMetadata 会纠正）
+		base := strings.TrimSuffix(d.Name(), ".jsonl")
+		// subagent 文件：agent-<id>.jsonl，用完整相对路径做 SourceID 保证唯一
+		rel, err := filepath.Rel(projectsDir, path)
+		if err != nil {
+			return nil
+		}
+		out = append(out, adapters.SessionSource{
+			SessionID: base,
+			Path:      path,
+			SourceID:  rel,
+			Mtime:     info.ModTime().Unix(),
+			Size:      info.Size(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
@@ -159,6 +166,13 @@ func (a *Adapter) ParseMetadata(
 		SourceMtime:     src.Mtime,
 		SourceSize:      src.Size,
 		Activity:        model.ActivityInactive,
+	}
+
+	// 子会话识别：路径含 /subagents/，父会话 ID 为 subagents 上级目录名
+	if idx := strings.Index(src.Path, string(filepath.Separator)+"subagents"+string(filepath.Separator)); idx > 0 {
+		parentPath := src.Path[:idx]
+		s.IsSubagent = true
+		s.ParentSessionID = filepath.Base(parentPath)
 	}
 
 	var (
