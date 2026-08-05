@@ -61,7 +61,7 @@ assistant 消息含 `internal_chat_message_metadata_passthrough` 等字段。
 }}}
 ```
 
-注意：`total_token_usage` 与 `last_token_usage` 并存，且 total 可能是**累计值**，需按 §13.3 去重识别。
+注意：`total_token_usage` 为会话**累计值**，`last_token_usage` 为**单次增量**（已实测确认，2026-08-05）。
 
 ## 字段可用性
 
@@ -85,6 +85,14 @@ assistant 消息含 `internal_chat_message_metadata_passthrough` 等字段。
   - `<environment_context><cwd>...</cwd>...` 块
 - 取剩余 `input_text` 块拼接。
 
+## Token 字段含义
+
+- `total_token_usage` 为**会话累计值**（实测 2026-08-05：input 21154→50498→83511...
+  单调递增，取最后非零值作为会话输入；含 cached_input_tokens）。
+- `last_token_usage` 为**本次请求增量**（input 29344→33013...），用于请求级时间线。
+- `reasoning_output_tokens` 推理 Token。
+- 数据量可非常大（实测单会话 26662 行、累计 695M input，其中 678M 为缓存读）。
+
 ## 恢复命令
 
 ```
@@ -97,14 +105,18 @@ codex resume <session-id>
 
 - `history.jsonl` 只记录用户输入，不能作为完整会话来源（仅可辅助）。
 - `logs_2.sqlite` 主要是日志（target=feedback_tags 等），非会话主数据；不作为解析来源。
-- token_count 中 total/last 语义需要更多样本验证累计 vs 增量。
 - 会话文件按天分目录，Discover 需递归遍历。
+- 未发现独立子会话标识字段；父子关系需后续确认。
 
 ## 测试样本来源
 
-真实环境 `~/.codex/sessions/2026/08/03/rollout-2026-08-03T14-01-19-019fc636-*.jsonl`（213 行）等只读采样。
+真实环境 `~/.codex/sessions/2026/08/03/rollout-2026-08-03T14-01-19-019fc636-*.jsonl`
+（213 行）等只读采样，含 2062 行 token_count 的超大会话。
 
 ## 验证状态
 
 - [x] 真实环境验证：目录结构、session_meta、user 消息结构、注入块、token_count、恢复命令。
-- [ ] 兼容性假设（未验证）：老版本字段差异、历史模式（history_mode）其他取值、非 interactive 会话。
+- [x] 真实环境验证（2026-08-05 补充）：**token_count 累计语义**
+      （total=累计 / last=增量）、超大数值会话。
+- [ ] 兼容性假设（未验证）：老版本字段差异、历史模式（history_mode）其他取值、
+      非 interactive 会话、子会话关系。

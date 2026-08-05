@@ -198,12 +198,14 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 | 项 | 状态 |
 |----|------|
-| Claude 消息 id 字段在各版本的一致性 | 需更多样本 |
-| Codex `token_count` 的累计语义是否跨 session | 需验证（观察为 per-turn total） |
-| OpenCode `session.time_updated` 是否覆盖子 session 更新 | 需验证 |
-| OpenCode WAL 中尚未 checkpoint 的数据读可见性 | 需只读模式实测 |
-| FTS5 中文 tokenizer 行为 | Phase 0 验证 |
-| Claude subagent 的 usage 汇总口径 | 需采样 |
+| Claude input_tokens 累计语义 | **已实测确认**（2026-08-05）：累计上下文，output 增量 |
+| Codex `total_token_usage` 累计语义 | **已实测确认**：total=累计 / last=增量 |
+| OpenCode WAL 未 checkpoint 数据读可见性 | **已实测确认**：只读连接可见 |
+| OpenCode 子 session / 父 time_updated 覆盖 | **已实测确认**：27 个父子会话，父会话时间覆盖子会话 |
+| OpenCode step-finish total 语义 | **已实测确认**：累计上下文快照 |
+| Claude subagent usage 口径 | **已实测确认**：与主会话结构一致 |
+| Claude 消息 id 字段在各版本的一致性 | 需更多版本样本 |
+| FTS5 中文 tokenizer 行为 | Phase 0 验证（trigram 3 字 + LIKE 短词兜底） |
 
 ## 6. 验收对照
 

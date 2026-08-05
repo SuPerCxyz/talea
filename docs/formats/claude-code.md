@@ -70,8 +70,13 @@ assistant 行 message 含额外字段：
 
 ## Token 字段含义
 
-- `usage.input_tokens` / `usage.output_tokens` 为**单次请求增量值**（实测样本中为 0/0，表示该版本对部分模型未填充）。
-- 未观察到 cache/reasoning/tool 字段；若缺失则按「未知」处理，不得显示为 0。
+- `usage.input_tokens` 为**累计上下文值**（实测 2026-08-05：多个会话单调递增，
+  如 83455→89600→99207...，取最后非零值作为会话输入）。
+- `usage.output_tokens` 为**单次增量**（波动，求和）。
+- `cache_read_input_tokens` / `cache_creation_input_tokens` 为缓存读写（实测为 0，
+  本机未启用缓存；字段存在但为空）。
+- `reasoning_tokens` 推理 Token（部分版本存在）。
+- 早期行可能为 `0/0`（模型未填充），不能作为有效 Token 数据。
 
 ## 恢复命令
 
@@ -87,12 +92,16 @@ claude --resume <sessionId>
 - content 数组各块类型（tool_use 等）细节未逐一枚举。
 - summary 类型记录的结构未采样。
 - 无独立会话元数据文件，创建/结束时间需从首尾记录推断。
+- 本机 claude 子会话（subagents/*.jsonl）已验证存在，usage 结构一致。
 
 ## 测试样本来源
 
-真实环境 `~/.claude/projects/-home-superc-code-pentimento/3818b566-*.jsonl` 只读采样（含 4261 行）。夹具需脱敏后放入 `testdata/claude/`。
+真实环境 `~/.claude/projects/-home-superc-code-pentimento/3818b566-*.jsonl` 只读采样
+（含 4261 行主会话 + subagents/*.jsonl 子会话）。夹具需脱敏后放入 `testdata/claude/`。
 
 ## 验证状态
 
-- [x] 真实环境验证：目录、单行结构、cwd、sessionId、时间戳、首条 user 消息、assistant usage、恢复命令。
+- [x] 真实环境验证：目录、单行结构、cwd、sessionId、时间戳、首条 user 消息、恢复命令。
+- [x] 真实环境验证（2026-08-05 补充）：**usage 累计语义**（input 累计/output 增量）、
+      cache 字段存在性、子会话结构。
 - [ ] 兼容性假设（未验证）：老版本格式、content 数组全类型、summary 结构。

@@ -99,8 +99,9 @@ part.data 类型（实测）：`text`、`reasoning`、`tool`、`step-start`、`s
 
 ## Token 字段含义
 
-- session 表 tokens_* 为**会话级汇总**。
-- step-finish 的 tokens 为**分步值**。
+- session 表 tokens_* 为**会话级汇总**（累计）。
+- step-finish 的 tokens 为**上下文快照**（total 为累计上下文，input 为本次增量，
+  已实测确认 2026-08-05）。
 - 两者并存时必须按 §13.3 去重，避免重复累计。
 
 ## 恢复命令
@@ -116,14 +117,13 @@ opencode run -s <session-id>
 - 必须使用 `file:...?mode=ro` URI 只读打开。
 - 必须设置 busy timeout（WAL 模式，其他进程可能持有锁）。
 - 数据库很大（6GB），禁止整库复制；增量索引基于 `time_updated`。
-- 只读打开不 checkpoint WAL，可能读到已提交但未 checkpoint 的数据——符合预期。
+- 只读打开不 checkpoint WAL，可读到已提交但未 checkpoint 的数据——符合预期。
 
 ## 已知限制 / 未确认项
 
-- WAL 未 checkpoint 数据的可见性需只读实测确认。
-- 会话级 tokens 与 step tokens 的精确关系未逐条验证。
 - project/workspace 表的用途（可能与目录关联）未展开。
 - session.path 与 directory 的关系未确认（样本中 path 为 `home/...` 无前导斜杠，directory 为完整路径）。
+- 子会话（parent_id 非空）的 usage 是否被计入父会话 tokens_* 需确认（当前按独立会话处理）。
 
 ## 测试样本来源
 
@@ -132,4 +132,7 @@ opencode run -s <session-id>
 ## 验证状态
 
 - [x] 真实环境验证：数据库表结构、session 字段、message/part 结构、step-finish tokens、恢复命令。
-- [ ] 兼容性假设（未验证）：WAL 可见性、老版本 schema、父子 session 关联规则。
+- [x] 真实环境验证（2026-08-05 补充）：**WAL 可见性**（只读连接读到 20:13 的新会话，
+      WAL 578MB 未 checkpoint）、**子会话**（27 个带 parent_id，父会话 time_updated
+      覆盖子会话更新）、step-finish total 为累计上下文。
+- [ ] 兼容性假设（未验证）：老版本 schema、子会话 usage 与父会话 tokens_* 的精确关系。
