@@ -61,3 +61,49 @@ func TestIsPathSafe(t *testing.T) {
 		}
 	}
 }
+
+// TestMaliciousSessionIDPath 验证恶意 Session ID 与 cwd 被路径安全检查拦截。
+func TestMaliciousSessionIDPath(t *testing.T) {
+	// 恶意 session id 通过路径安全检查（它们不进入 shell）
+	// 但参数数组执行保证不解释。这里验证 IsPathSafe 拦截 shell 元字符路径。
+	maliciousPaths := []string{
+		"/tmp/$(rm -rf /)",
+		"/tmp/`id`",
+		"/tmp/x; reboot",
+		"/tmp/a && rm -rf .",
+		"/tmp/p|nc -e /bin/sh",
+	}
+	for _, p := range maliciousPaths {
+		ok, reason := IsPathSafe(p)
+		if ok {
+			t.Fatalf("expected unsafe path %q, got safe", p)
+		}
+		if reason == "" {
+			t.Fatalf("expected reason for %q", p)
+		}
+	}
+}
+
+// TestAnsiInjection 验证 ANSI 注入序列被剥离。
+func TestAnsiInjection(t *testing.T) {
+	payloads := []string{
+		"\x1b[31mred\x1b[0m",
+		"\x1b]0;title\x07content",
+		"\x1b[2J\x1b[H",
+	}
+	for _, p := range payloads {
+		cleaned := StripANSI(p)
+		if containsEscape(cleaned) {
+			t.Fatalf("ANSI escape survived: %q -> %q", p, cleaned)
+		}
+	}
+}
+
+func containsEscape(s string) bool {
+	for _, r := range s {
+		if r == 0x1b {
+			return true
+		}
+	}
+	return false
+}

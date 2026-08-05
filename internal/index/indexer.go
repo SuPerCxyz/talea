@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/talea/talea/internal/adapters"
+	"github.com/talea/talea/internal/adapters/extract"
 	"github.com/talea/talea/internal/app"
 	"github.com/talea/talea/internal/model"
 )
@@ -60,6 +61,8 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 				res.Skipped++
 				continue
 			}
+			// 文件被截断（新 size 小于已记录偏移）：mtime 已变化，走重解析分支。
+			_ = t
 			sess, err := ad.ParseMetadata(ctx, inst, src)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -71,6 +74,10 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 				continue
 			}
 			sess.IndexedAt = sess.UpdatedAt
+			// 断点续读：记录文件解析偏移（JSONL 源），用于截断/尾行暂存检测
+			if off, err := extract.LastCompleteLineOffset(sess.SourcePath); err == nil {
+				sess.SourceOffset = off
+			}
 			ix.App.ResolveWorkingDirs(ctx, []*model.Session{sess})
 			batch = append(batch, sess)
 		}

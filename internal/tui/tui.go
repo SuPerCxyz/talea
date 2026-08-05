@@ -81,14 +81,15 @@ type keyMap struct {
 	Timeline key.Binding
 	Context  key.Binding
 	Model    key.Binding
+	Preview  key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Timeline, k.Context, k.Back, k.Quit}
+	return []key.Binding{k.Enter, k.Timeline, k.Context, k.Preview, k.Back, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Enter, k.Timeline, k.Context, k.Model, k.Back, k.Quit}}
+	return [][]key.Binding{{k.Enter, k.Timeline, k.Context, k.Model, k.Preview, k.Back, k.Quit}}
 }
 
 type item struct {
@@ -125,6 +126,7 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *ind
 		Timeline: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "Token 时间线")),
 		Context:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "上下文曲线")),
 		Model:    key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "模型汇总")),
+		Preview:  key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "对话预览")),
 	}
 	return &mainModel{
 		ctx:      ctx,
@@ -241,6 +243,9 @@ func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, m.keys.Model):
 		m.detail.tab = "model"
+		return m, nil
+	case key.Matches(msg, m.keys.Preview):
+		m.detail.tab = "preview"
 		return m, nil
 	case key.Matches(msg, key.NewBinding(key.WithKeys("h"))):
 		m.detail.tab = ""

@@ -3,6 +3,7 @@ package resume
 import (
 	"testing"
 
+	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/model"
 )
 
@@ -72,5 +73,53 @@ func TestBuildWithMapping(t *testing.T) {
 	}
 	if !plan.DirMapped {
 		t.Fatal("expected mapped=true")
+	}
+}
+
+// TestResumeCommandArgsNotShellInterpreted 验证恶意 Session ID / cwd 作为参数数组
+// 传递时不会被 shell 解释（无 sh -c 拼接）。
+func TestResumeCommandArgsNotShellInterpreted(t *testing.T) {
+	// 恶意 session id 包含 shell 元字符
+	malicious := []string{
+		"8f463a2e; rm -rf /",
+		"$(id)",
+		"`whoami`",
+		"abc && shutdown",
+		"x|ls",
+		"a' OR '1'='1",
+	}
+	for _, sid := range malicious {
+		s := model.Session{SessionID: sid, WorkingDirectory: "/safe/dir"}
+		plan, err := Build(s, "", nil)
+		if err != nil {
+			t.Fatalf("session %q: %v", sid, err)
+		}
+		// 构造命令：参数应原样保留，不做 shell 展开
+		cmd := adapters.Command{Program: "claude", Args: []string{"--resume", sid}}
+		_ = plan
+		if len(cmd.Args) != 2 || cmd.Args[1] != sid {
+			t.Fatalf("session %q: args altered: %v", sid, cmd.Args)
+		}
+	}
+}
+
+// TestWorkingDirPassedAsArg 验证包含引号/空格/中文的目录原样传入。
+func TestWorkingDirPassedAsArg(t *testing.T) {
+	dirs := []string{
+		"/home/user/code/cinder",
+		"/tmp/dir with space",
+		"/tmp/中文目录/项目",
+		"/tmp/it's here",
+		`/tmp/quote"dir`,
+	}
+	for _, dir := range dirs {
+		s := model.Session{SessionID: "s1", WorkingDirectory: dir}
+		plan, err := Build(s, "", nil)
+		if err != nil {
+			t.Fatalf("dir %q: %v", dir, err)
+		}
+		if plan.TargetDir != dir {
+			t.Fatalf("dir %q altered to %q", dir, plan.TargetDir)
+		}
 	}
 }

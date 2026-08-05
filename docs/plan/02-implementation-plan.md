@@ -78,76 +78,77 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 ## 3. 实施阶段
 
-### Phase 0：技术验证 + 骨架（半天内）
+### Phase 0：技术验证 + 骨架
 
-- [ ] 验证 modernc sqlite 只读 + WAL + busy
-- [ ] 验证 FTS5 中文搜索
-- [ ] go mod init，引入依赖
-- [ ] `cmd/talea/main.go` + version 包
-- [ ] `internal/model/*.go`：Session、TokenUsage、TimelineEvent、ActivityState、TimeSource 等（规格 §8/§13/§14）
-- [ ] `internal/config`：默认配置 + TOML 加载 + validate
-- [ ] `talea version` 可运行
+- [x] 验证 modernc sqlite 只读 + WAL + busy
+- [x] 验证 FTS5 中文搜索（trigram，见 §5 风险清单）
+- [x] go mod init，引入依赖
+- [x] `cmd/talea/main.go` + version 包
+- [x] `internal/model/*.go`：Session、TokenUsage、TimelineEvent、ActivityState、TimeSource 等（规格 §8/§13/§14）
+- [x] `internal/config`：默认配置 + TOML 加载 + validate
+- [x] `talea version` 可运行
 
 ### Phase 1：适配器与解析（核心）
 
-- [ ] `internal/adapters/adapter.go`：AdapterInfo、AgentInstance、能力声明、可选接口（§7）
-- [ ] `internal/adapters/registry.go`：注册表，无 switch 硬编码
-- [ ] `internal/adapters/claude`：Discover/ParseMetadata/LoadMessages/LoadUsage/Resume
-- [ ] `internal/adapters/codex`：同上，含 AGENTS.md 注入过滤
-- [ ] `internal/adapters/opencode`：只读 SQLite，session/message/part
-- [ ] 首次提问提取器（`internal/adapters` 共享函数 + 各适配器定制）：§9 全部场景
-- [ ] 时间提取：StartTime/EndTime 优先级（§10）
-- [ ] 工作目录提取 + Git 信息（§11）
-- [ ] 测试夹具 `testdata/{claude,codex,opencode}/*`（脱敏）
-- [ ] 适配器单元测试 + 集成测试
+- [x] `internal/adapters/adapter.go`：AdapterInfo、AgentInstance、能力声明、可选接口（§7）
+- [x] `internal/adapters/registry.go`：注册表，无 switch 硬编码
+- [x] `internal/adapters/claude`：Discover/ParseMetadata/LoadMessages/LoadUsage/Resume
+- [x] `internal/adapters/codex`：同上，含 AGENTS.md 注入过滤
+- [x] `internal/adapters/opencode`：只读 SQLite，session/message/part
+- [x] 首次提问提取器（`internal/adapters` 共享函数 + 各适配器定制）：§9 全部场景
+- [x] 时间提取：StartTime/EndTime 优先级（§10）
+- [x] 工作目录提取 + Git 信息（§11）
+- [x] 测试夹具 `testdata/{claude,codex,opencode}/*`（脱敏）
+- [x] 适配器单元测试 + 集成测试
 
 ### Phase 2：存储与索引
 
-- [ ] `internal/index/schema.go`：三张表 + 索引（§18）
-- [ ] `internal/index/migrate.go`：schema version、幂等迁移、WAL、备份
-- [ ] `internal/index/open.go`：0600 权限、单实例写
-- [ ] `internal/index/incremental.go`：偏移、mtime/size/inode、截断/替换处理、尾行暂存
-- [ ] `internal/index/usage.go`：session_usage 表写入 + source_identity 去重
-- [ ] `talea index` / `talea index --rebuild` / `--metadata-only`
-- [ ] 增量索引测试：追加、截断、替换、删除、同 ID 跨 Agent
+- [x] `internal/index/schema.go`：三张表 + 索引（§18）
+- [x] `internal/index/migrate.go`：schema version、幂等迁移、WAL、备份
+- [x] `internal/index/open.go`：0600 权限、单实例写
+- [x] `internal/index/incremental.go`：偏移断点续读（source_offset 持久化 +
+      LastCompleteLineOffset 检测截断/尾行暂存，mtime+size 变化触发重解析）
+- [x] `internal/index/usage.go`：session_usage 表写入 + source_identity 去重
+- [x] `talea index` / `talea index --rebuild` / `--metadata-only`
+- [x] 增量索引测试：追加、截断、替换、删除、同 ID 跨 Agent（incremental_test.go）
 
 ### Phase 3：搜索
 
-- [ ] `internal/search`：FTS5 建表 + 权重（§20）+ 过滤参数
-- [ ] `talea search "kw" --agent --cwd --since`
-- [ ] 中文搜索测试
+- [x] `internal/search`：FTS5 建表 + 权重（§20）+ 过滤参数
+- [x] `talea search "kw" --agent --cwd --since`
+- [x] 中文搜索测试
 
 ### Phase 4：CLI 命令面
 
-- [ ] `talea list`（--agent/--cwd/--today/--active/--include-subagents/--sort/--limit/--format）
-- [ ] `talea open`（含 --dry-run、--cwd 覆盖、路径映射、目录缺失交互）
-- [ ] `talea usage` / `talea timeline`（P1 前置的 CLI 骨架）
-- [ ] `talea last` / `talea config path|init|validate`
-- [ ] `talea doctor`（骨架 → Phase 6 完善）
-- [ ] 退出码规范（§26）
-- [ ] JSON/table/csv/markdown 输出
+- [x] `talea list`（--agent/--cwd/--today/--active/--include-subagents/--sort/--limit/--format）
+- [x] `talea open`（含 --dry-run、--cwd 覆盖、路径映射、目录缺失交互）
+- [x] `talea usage` / `talea timeline`（P1 前置的 CLI 骨架）
+- [x] `talea last` / `talea config path|init|validate`
+- [x] `talea doctor`（骨架 → Phase 6 完善）
+- [x] 退出码规范（§26）
+- [x] JSON/table/csv/markdown 输出
 
 ### Phase 5：恢复 + 目录缺失
 
-- [ ] `internal/resume`：构造命令（参数数组）、`syscall.Exec`、LookPath
-- [ ] 路径映射最长前缀匹配（`[path_mapping]`）
-- [ ] 原目录不存在交互：映射/当前目录/仅查看/复制命令/取消
-- [ ] 命令注入安全测试（恶意 session id、cwd、引号、元字符）
+- [x] `internal/resume`：构造命令（参数数组）、`syscall.Exec`、LookPath
+- [x] 路径映射最长前缀匹配（`[path_mapping]`）
+- [x] 原目录不存在交互：映射/当前目录/仅查看/复制命令/取消
+- [x] 命令注入安全测试（恶意 session id / cwd / 引号 / 元字符 / ANSI 注入）
 
 ### Phase 6：Doctor
 
-- [ ] 三 Agent 可执行文件/版本/数据目录/格式/会话数/能力检查
-- [ ] 索引状态、FTS5、0600 权限
-- [ ] `--json` / `--agent`
-- [ ] 警告分级与聚合
+- [x] 三 Agent 可执行文件/版本/数据目录/格式/会话数/能力检查
+- [x] 索引状态、FTS5、0600 权限
+- [x] `--json` / `--agent`
+- [x] 警告分级与聚合
 
 ### Phase 7：TUI
 
-- [ ] 会话列表（列动态隐藏、中文宽度、排序、搜索过滤）
-- [ ] 详情页（字段 + 对话预览 + 按需加载 + ANSI 清理）
-- [ ] Enter 恢复流程
-- [ ] 活动状态、进行中标识
-- [ ] Token 时间线页（P1 完整；P0 预留快捷键）
+- [x] 会话列表（列动态隐藏、中文宽度、排序、搜索过滤）
+- [x] 详情页对话预览（p 键，按需加载 + ANSI 清理 + 脱敏）
+- [x] Enter 恢复流程
+- [x] 活动状态、进行中标识
+- [x] Token 时间线页（P1 完整；P0 预留快捷键）
 
 ### Phase 8：P1 — Token 汇总与时间线（已完成）
 

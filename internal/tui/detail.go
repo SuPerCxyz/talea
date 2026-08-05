@@ -13,6 +13,7 @@ import (
 	"github.com/talea/talea/internal/app"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
+	"github.com/talea/talea/internal/preview"
 	"github.com/talea/talea/internal/timeline"
 )
 
@@ -29,7 +30,7 @@ type detailModel struct {
 	sess  *model.Session
 	view  viewport.Model
 	ready bool
-	tab   string // "" 详情, "timeline" Token 时间线, "context" 上下文曲线, "model" 模型汇总
+	tab   string // "" 详情, "timeline", "context", "model", "preview"
 }
 
 // render 渲染当前 tab 内容。
@@ -41,6 +42,8 @@ func (d *detailModel) render() string {
 		return d.renderContext()
 	case "model":
 		return d.renderModel()
+	case "preview":
+		return d.renderPreview()
 	default:
 		return d.renderDetail()
 	}
@@ -130,6 +133,40 @@ func (d *detailModel) renderModel() string {
 			m.Model, m.Requests, humanNum(m.InputTokens), humanNum(m.OutputTokens), humanNum(m.TotalTokens)))
 	}
 	sb.WriteString("\n按 h 返回详情")
+	return sb.String()
+}
+
+// renderPreview 渲染对话预览（按需加载，ANSI 清理 + 脱敏）。
+func (d *detailModel) renderPreview() string {
+	ad, ok := d.app.Registry.Get(d.sess.AgentID)
+	if !ok {
+		return "会话格式不支持"
+	}
+	msgs, err := preview.Load(d.ctx, ad, *d.sess, preview.Options{
+		Limit:  60,
+		Redact: d.app.Config.Privacy.RedactSecretsInPreview,
+	})
+	if err != nil {
+		return "加载预览失败：" + err.Error()
+	}
+	if len(msgs) == 0 {
+		return "该会话没有可预览的消息"
+	}
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("对话预览") + "\n\n")
+	for _, m := range msgs {
+		roleStyle := valueStyle
+		if m.Role == "用户" {
+			roleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("120"))
+		}
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", roleStyle.Render(m.Role), labelStyle.Render(m.Timestamp)))
+		content := strings.TrimSpace(m.Content)
+		if content != "" {
+			sb.WriteString(content + "\n")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("按 h 返回详情")
 	return sb.String()
 }
 

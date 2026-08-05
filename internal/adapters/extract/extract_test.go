@@ -1,6 +1,9 @@
 package extract
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestStripInjectedContent(t *testing.T) {
 	cases := []struct {
@@ -95,4 +98,64 @@ func TestJSONLLineReaderBadLine(t *testing.T) {
 	if obj["type"] != "assistant" {
 		t.Fatalf("got %v", obj["type"])
 	}
+}
+
+func TestLastCompleteLineOffset(t *testing.T) {
+	dir := t.TempDir()
+
+	// 完整换行结尾：offset == size
+	path1 := dir + "/complete.jsonl"
+	writeFile(t, path1, "{\"a\":1}\n{\"b\":2}\n")
+	size1 := fileSize(t, path1)
+	off1, err := LastCompleteLineOffset(path1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off1 != size1 {
+		t.Fatalf("complete: off=%d size=%d", off1, size1)
+	}
+
+	// 不完整尾行：offset 指向最后一个完整换行之后
+	path2 := dir + "/tail.jsonl"
+	content2 := "{\"a\":1}\n{\"b\":2}\n{\"c\":3}"
+	writeFile(t, path2, content2)
+	// 最后一个完整换行是第二个 \n（index 15），offset = 16
+	lastNL := indexOfNl(content2, 2)
+	off2, err := LastCompleteLineOffset(path2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off2 != int64(lastNL+1) {
+		t.Fatalf("tail: off=%d want=%d", off2, lastNL+1)
+	}
+
+	// 空文件
+	path3 := dir + "/empty.jsonl"
+	writeFile(t, path3, "")
+	off3, _ := LastCompleteLineOffset(path3)
+	if off3 != 0 {
+		t.Fatalf("empty: off=%d", off3)
+	}
+}
+
+func fileSize(t *testing.T, path string) int64 {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi.Size()
+}
+
+func indexOfNl(s string, nth int) int {
+	count := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			count++
+			if count == nth {
+				return i
+			}
+		}
+	}
+	return -1
 }
