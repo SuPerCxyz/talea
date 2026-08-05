@@ -180,7 +180,8 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 - [x] search/list 过滤补全（--project / --branch）
 - [x] doctor 增强（索引格式/Token 完整性/FTS/路径映射冲突）
 - [x] 会话标签 / 收藏 / 备注（`talea tag`）
-- [x] 外部适配器协议（`talea-adapter-<name>` JSON stdio）
+- [x] 外部适配器协议（`talea-adapter-<name>` JSON stdio，
+      7 方法：info/detect/discover/parse/messages/usage/timeline）
 - [x] `talea run` 真实进程时间回写（process_start/process_exit）
 - [x] 本地 Web 只读视图（`talea web`，仅 127.0.0.1）
 - [x] 多设备离线导入导出（`talea export` / `talea import`）

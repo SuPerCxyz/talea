@@ -190,6 +190,13 @@ usage 事件通过 `source_identity` 去重。子 Agent Token 独立保存，默
 新增一个 `internal/adapters/<name>/` 包并在 `registry.go` 注册即可，核心代码
 无 `switch agent` 硬编码。详见 `docs/adapters/adding-an-agent.md`。
 
+## 外部适配器（插件）
+
+不修改源码也能扩展新 Agent：把实现 `talea-adapter-<name>` 协议的可执行文件
+放入 PATH，Talea 自动发现。协议为 JSON Lines over stdio，支持 7 个方法
+（info/detect/discover/parse/messages/usage/timeline），任何语言皆可实现。
+详见 `docs/adapters/external-plugin-proposal.md`。
+
 ## 故障排查
 
 ```text

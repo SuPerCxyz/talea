@@ -2,6 +2,8 @@
 bin/
 dist/
 *.exe
+talea-adapter-*
+!/scripts/talea-adapter-example/
 
 # Test artifacts
 *.test
