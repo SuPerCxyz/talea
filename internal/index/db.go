@@ -380,6 +380,18 @@ func (db *DB) AggregateChildTokens(ctx context.Context, rel model.SessionRelatio
 	return err
 }
 
+// SetActivity 更新会话活动状态。
+func (db *DB) SetActivity(ctx context.Context, instanceID, sessionID string, state model.ActivityState) (bool, error) {
+	res, err := db.sql.ExecContext(ctx,
+		`UPDATE sessions SET activity_state = ? WHERE agent_instance_id = ? AND session_id = ?`,
+		string(state), instanceID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 func toEpoch(t *time.Time) any {
 	if t == nil {
 		return nil

@@ -529,6 +529,11 @@ func (a *Adapter) IterateUsageEvents(
 	return &eventIterator{events: events}, nil
 }
 
+// DetectActivity 检测会话活动状态（进程 + 文件更新时间）。
+func (a *Adapter) DetectActivity(ctx context.Context, s model.Session) (model.ActivityState, error) {
+	return adapters.ProcessActivityDetector{Executable: "opencode"}.DetectActivity(ctx, s)
+}
+
 // messageModel 从消息 data 提取模型名。
 func (a *Adapter) messageModel(ctx context.Context, db *sql.DB, msgID string) string {
 	var raw string

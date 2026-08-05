@@ -126,8 +126,7 @@ func (ix *Indexer) indexTimelineEvents(ctx context.Context, sess *model.Session,
 
 // ResolveSubagentRelations 聚合子 Agent Token 到父会话。
 // 返回聚合的关系数。单条失败不中止。
-func (ix *Indexer) ResolveSubagentRelations(ctx context.Context) (int, error) {
-	insts, err := ix.App.DetectInstances(ctx)
+func (ix *Indexer) ResolveSubagentRelations(ctx context.Context) (int, error) {	insts, err := ix.App.DetectInstances(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -182,6 +181,33 @@ func (ix *Indexer) loadAllSessions(ctx context.Context) ([]*model.Session, error
 		out = append(out, s)
 	}
 	return out, nil
+}
+
+// RefreshActivities 重新检测全部会话的活动状态并写回。
+func (ix *Indexer) RefreshActivities(ctx context.Context) (int, error) {
+	all, err := ix.loadAllSessions(ctx)
+	if err != nil {
+		return 0, err
+	}
+	updated := 0
+	for _, s := range all {
+		ad, ok := ix.App.Registry.Get(s.AgentID)
+		if !ok {
+			continue
+		}
+		det, ok := adapters.As[adapters.ActivityDetector](ad)
+		if !ok {
+			continue
+		}
+		state, err := det.DetectActivity(ctx, *s)
+		if err != nil {
+			continue
+		}
+		if _, err := ix.DB.SetActivity(ctx, s.AgentInstanceID, s.SessionID, state); err == nil {
+			updated++
+		}
+	}
+	return updated, nil
 }
 
 var _ = adapters.Command{}

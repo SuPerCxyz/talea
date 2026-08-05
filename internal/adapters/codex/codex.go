@@ -40,6 +40,7 @@ func (a *Adapter) Info() model.AdapterInfo {
 			model.CapabilityReadMessages,
 			model.CapabilityResume,
 			model.CapabilityWorkingDirectory,
+			model.CapabilityActiveDetection,
 			model.CapabilityIncrementalIndex,
 			model.CapabilityTokenSummary,
 			model.CapabilityTokenTimeline,
@@ -609,4 +610,9 @@ func itoa(n int64) string {
 		n /= 10
 	}
 	return string(buf[pos:])
+}
+
+// DetectActivity 检测会话活动状态（进程 + 文件更新时间）。
+func (a *Adapter) DetectActivity(ctx context.Context, s model.Session) (model.ActivityState, error) {
+	return adapters.ProcessActivityDetector{Executable: "codex"}.DetectActivity(ctx, s)
 }

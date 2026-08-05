@@ -200,6 +200,9 @@ func newIndexCmd() *cobra.Command {
 				if n, err := ix.ResolveSubagentRelations(ctx); err == nil && n > 0 {
 					fmt.Fprintf(os.Stdout, "子 Agent 聚合：%d 条关系\n", n)
 				}
+				if n, err := ix.RefreshActivities(ctx); err == nil && n > 0 {
+					fmt.Fprintf(os.Stdout, "活动状态检测：%d 个会话\n", n)
+				}
 			}
 			for _, r := range results {
 				status := "OK"

@@ -134,7 +134,8 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		       s.source_path, s.source_id, s.source_mtime,
 		       s.source_size, s.source_offset,
 		       s.format_name, s.format_version,
-		       s.working_dir_exists, s.project_name, s.git_root, s.git_remote
+		       s.working_dir_exists, s.project_name, s.git_root, s.git_remote,
+		       s.activity_state
 		FROM sessions s
 		WHERE %s
 		ORDER BY s.last_activity_at DESC
@@ -150,10 +151,11 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 	var out []Result
 	for rows.Next() {
 		var (
-			s                    model.Session
-			started, ended, last *int64
-			duration             *int64
-			wdExists             int
+			s                         model.Session
+			started, ended, last      *int64
+			duration                  *int64
+			wdExists                  int
+			activity                  string
 		)
 		if err := rows.Scan(&s.AgentID, &s.AgentInstanceID, &s.SessionID,
 			&s.FirstQuestion, &started, &ended, &last, &duration,
@@ -162,10 +164,12 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 			&s.SourcePath, &s.SourceID, &s.SourceMtime,
 			&s.SourceSize, &s.SourceOffset,
 			&s.FormatName, &s.FormatVersion,
-			&wdExists, &s.ProjectName, &s.GitRoot, &s.GitRemote); err != nil {
+			&wdExists, &s.ProjectName, &s.GitRoot, &s.GitRemote,
+			&activity); err != nil {
 			continue
 		}
 		s.WorkingDirExists = wdExists != 0
+		s.Activity = model.ActivityState(activity)
 		if started != nil {
 			t := fromEpoch(*started)
 			s.StartedAt = &t
