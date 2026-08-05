@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
@@ -220,11 +221,10 @@ func handleMissingDir(sess *model.Session, missingDir string, mappings map[strin
 }
 
 func isTTY(f *os.File) bool {
-	fi, err := f.Stat()
-	if err != nil {
+	if f == nil {
 		return false
 	}
-	return fi.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // exitError 携带退出码的错误。

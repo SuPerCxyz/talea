@@ -29,6 +29,15 @@ const (
 func Execute() int {
 	root := NewRootCmd()
 	if err := root.Execute(); err != nil {
+		// 识别带退出码的错误（exitError 值或指针），否则统一 ExitError
+		switch e := err.(type) {
+		case exitError:
+			fmt.Fprintln(os.Stderr, "talea:", e.msg)
+			return e.code
+		case *exitError:
+			fmt.Fprintln(os.Stderr, "talea:", e.msg)
+			return e.code
+		}
 		fmt.Fprintln(os.Stderr, "talea:", err)
 		return ExitError
 	}
