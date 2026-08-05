@@ -59,6 +59,10 @@ func Run(ctx context.Context, a *app.App, agentFilter string) (Report, error) {
 		if agentFilter != "" && string(info.ID) != agentFilter {
 			continue
 		}
+		// generic 为模板适配器，无默认安装，跳过诊断
+		if string(info.ID) == "generic-jsonl" {
+			continue
+		}
 		insts, err := ad.Detect(ctx)
 		if err != nil {
 			rep.addError(info.DisplayName, err.Error())
@@ -91,9 +95,13 @@ func Run(ctx context.Context, a *app.App, agentFilter string) (Report, error) {
 		if err == nil {
 			n, _ := db.Count(ctx)
 			rep.addOK("索引会话数", fmt.Sprintf("%d 个", n))
+			checkIndexHealth(ctx, db, &rep)
 			db.Close()
 		}
 	}
+
+	// 配置与路径映射检查
+	checkConfig(ctx, a, &rep)
 
 	sort.Slice(rep.Checks, func(i, j int) bool {
 		if rep.Checks[i].Agent != rep.Checks[j].Agent {
@@ -102,6 +110,75 @@ func Run(ctx context.Context, a *app.App, agentFilter string) (Report, error) {
 		return rep.Checks[i].Text < rep.Checks[j].Text
 	})
 	return rep, nil
+}
+
+// checkIndexHealth 检查索引完整性：未知格式、不完整 usage、损坏。
+func checkIndexHealth(ctx context.Context, db *index.DB, rep *Report) {
+	// 未知格式
+	var unknownFormat int
+	err := db.SQL().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sessions WHERE format_name IS NULL OR format_name = ''`).Scan(&unknownFormat)
+	if err == nil && unknownFormat > 0 {
+		rep.addWarn("索引格式", fmt.Sprintf("%d 个会话格式未知", unknownFormat))
+	} else if err == nil {
+		rep.addOK("索引格式", "全部已识别")
+	}
+
+	// 不完整 usage
+	var partialUsage int
+	err = db.SQL().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM session_usage WHERE completeness = 'partial' OR completeness = 'unknown'`).Scan(&partialUsage)
+	if err == nil && partialUsage > 0 {
+		rep.addWarn("Token 完整性", fmt.Sprintf("%d 个会话 Token 数据不完整", partialUsage))
+	}
+
+	// 子 Agent 会话（应默认隐藏）
+	var subagents int
+	err = db.SQL().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sessions WHERE is_subagent = 1`).Scan(&subagents)
+	if err == nil && subagents > 0 {
+		rep.addOK("子 Agent 会话", fmt.Sprintf("%d 个（默认隐藏）", subagents))
+	}
+
+	// FTS 完整性
+	var ftsCount int
+	err = db.SQL().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM session_fts`).Scan(&ftsCount)
+	if err == nil {
+		rep.addOK("FTS 索引", fmt.Sprintf("%d 条", ftsCount))
+	} else {
+		rep.addWarn("FTS 索引", "未初始化，请执行 talea index")
+	}
+}
+
+// checkConfig 检查配置与路径映射冲突。
+func checkConfig(ctx context.Context, a *app.App, rep *Report) {
+	// 路径映射前缀冲突：一个源前缀是另一个的严格前缀，映射结果不同则告警
+	keys := make([]string, 0, len(a.Config.PathMapping))
+	for k := range a.Config.PathMapping {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	conflict := false
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if strings.HasPrefix(keys[j], keys[i]+"/") {
+				conflict = true
+			}
+		}
+	}
+	if conflict {
+		rep.addWarn("路径映射", "检测到前缀重叠的路径映射，可能产生意外替换")
+	} else if len(keys) > 0 {
+		rep.addOK("路径映射", fmt.Sprintf("%d 条，无冲突", len(keys)))
+	}
+
+	// 配置存在性
+	if _, err := os.Stat(a.Paths.ConfigPath); os.IsNotExist(err) {
+		rep.addOK("配置", "使用默认值（未生成配置文件）")
+	} else {
+		rep.addOK("配置", a.Paths.ConfigPath)
+	}
 }
 
 func (r *Report) addOK(agent, text string) {
