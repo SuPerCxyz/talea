@@ -168,9 +168,21 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 - [x] 性能测试（1000/10000 会话、10 万事件）
 - [x] 安全测试组
 - [x] GitHub Actions CI（lint + test + build amd64/arm64）
-- [ ] GoReleaser 配置
-- [ ] README、privacy、token 文档
-- [ ] `talea doctor` 自检（在真实环境验证三 Agent）
+- [x] GoReleaser 配置
+- [x] README、privacy、token 文档
+- [x] `talea doctor` 自检（在真实环境验证三 Agent）
+
+### P1 增强与 P2（已完成）
+
+- [x] 活动状态检测（/proc 进程 + 文件更新时间，`list --active` 生效）
+- [x] 目录缺失交互处理（open 五选项，非 TTY 自动取消）
+- [x] search/list 过滤补全（--project / --branch）
+- [x] doctor 增强（索引格式/Token 完整性/FTS/路径映射冲突）
+- [x] 会话标签 / 收藏 / 备注（`talea tag`）
+- [x] 外部适配器协议（`talea-adapter-<name>` JSON stdio）
+- [x] `talea run` 真实进程时间回写（process_start/process_exit）
+- [x] 本地 Web 只读视图（`talea web`，仅 127.0.0.1）
+- [x] 多设备离线导入导出（`talea export` / `talea import`）
 
 ## 4. 关键设计决定（已确定）
 
