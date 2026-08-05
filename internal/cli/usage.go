@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -536,12 +537,31 @@ func writeEvents(w io.Writer, events []timeline.Event, format output.Format) err
 				intStr(e.TotalTokens), intStr(e.InputTokens), intStr(e.OutputTokens), intStr(e.ReasoningTokens)})
 		}
 		return nil
+	case output.FormatMarkdown:
+		fmt.Fprintf(w, "| 时间 | 类型 | 模型 | 总计 | 输入 | 输出 | 推理 |\n")
+		fmt.Fprintf(w, "|------|------|------|------|------|------|------|\n")
+		for _, e := range events {
+			fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s |\n",
+				fmtTS(e.Timestamp), string(e.EventType), mdCell(e.Model),
+				mdCell(intStr(e.TotalTokens)), mdCell(intStr(e.InputTokens)),
+				mdCell(intStr(e.OutputTokens)), mdCell(intStr(e.ReasoningTokens)))
+		}
+		return nil
 	default:
 		for _, e := range events {
 			fmt.Fprintf(w, "%s  %-18s  %s\n", fmtTS(e.Timestamp), string(e.EventType), describeEvent(e))
 		}
 		return nil
 	}
+}
+
+func mdCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\n", " ")
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // writeTurns 输出用户轮次聚合。
