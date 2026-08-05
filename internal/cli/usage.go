@@ -98,12 +98,20 @@ func newUsageCmd() *cobra.Command {
 				events, err := timeline.List(ctx, db, timeline.Query{
 					AgentInstanceID: sess.AgentInstanceID,
 					SessionID:       sess.SessionID,
-					Limit:           100,
+					Limit:           200,
 				})
 				if err == nil && len(events) > 0 {
-					fmt.Println("\n时间线事件（前 100 条）：")
+					fmt.Println("\n请求级明细：")
+					fmt.Printf("  %-10s  %-14s  %-8s  %-8s  %-8s  %-8s\n",
+						"时间", "模型", "输入", "输出", "缓存读", "总计")
 					for _, e := range events {
-						fmt.Printf("  %s  %s  %s\n", fmtTS(e.Timestamp), e.EventType, e.Model)
+						if e.EventType != model.UsageEventRequest {
+							continue
+						}
+						fmt.Printf("  %-10s  %-14s  %-8s  %-8s  %-8s  %-8s\n",
+							fmtTS(e.Timestamp), truncModel(e.Model),
+							optHuman(e.InputTokens), optHuman(e.OutputTokens),
+							optHuman(e.CacheReadTokens), optHuman(e.TotalTokens))
 					}
 				}
 			}
@@ -202,14 +210,18 @@ func newTimelineCmd() *cobra.Command {
 					return err
 				}
 			case "request", "":
-				if err := writeEvents(writer, events, output.Format(formatFlag)); err != nil {
-					return err
+				if bucket != "" {
+					if err := writeBuckets(writer, ctx, db, sess, bucket, aroundPeak, output.Format(formatFlag)); err != nil {
+						return err
+					}
+				} else {
+					if err := writeEvents(writer, events, output.Format(formatFlag)); err != nil {
+						return err
+					}
 				}
 			default:
 				return fmt.Errorf("不支持的 group-by：%s", groupBy)
 			}
-			_ = bucket
-			_ = aroundPeak
 			return nil
 		},
 	}
@@ -325,6 +337,76 @@ func signedHuman(n int64) string {
 		n = -n
 	}
 	return sign + human(n)
+}
+
+func optHuman(p *int64) string {
+	if p == nil {
+		return "未知"
+	}
+	return human(*p)
+}
+
+func truncModel(m string) string {
+	r := []rune(m)
+	if len(r) > 14 {
+		return string(r[:13]) + "…"
+	}
+	if m == "" {
+		return "未知"
+	}
+	return m
+}
+
+// writeBuckets 输出时间桶聚合。
+func writeBuckets(w io.Writer, ctx context.Context, db *index.DB, sess *model.Session, bucketFlag string, aroundPeak bool, format output.Format) error {
+	buckets, err := timeline.GroupByBucket(ctx, db, sess.AgentInstanceID, sess.SessionID, timeline.BucketSize(bucketFlag))
+	if err != nil {
+		return err
+	}
+	if len(buckets) == 0 {
+		fmt.Fprintln(w, "没有可聚合的请求数据")
+		return nil
+	}
+	if aroundPeak {
+		// 只显示峰值桶及其前后一个桶
+		maxIdx := 0
+		for i := 1; i < len(buckets); i++ {
+			if buckets[i].TotalTokens > buckets[maxIdx].TotalTokens {
+				maxIdx = i
+			}
+		}
+		lo := maxIdx - 1
+		if lo < 0 {
+			lo = 0
+		}
+		hi := maxIdx + 2
+		if hi > len(buckets) {
+			hi = len(buckets)
+		}
+		buckets = buckets[lo:hi]
+	}
+	switch format {
+	case output.FormatJSON:
+		return json.NewEncoder(w).Encode(buckets)
+	case output.FormatCSV:
+		cw := csv.NewWriter(w)
+		defer cw.Flush()
+		cw.Write([]string{"start", "end", "requests", "input", "output", "total", "cache_read", "reasoning"})
+		for _, b := range buckets {
+			cw.Write([]string{b.Start.Format("15:04"), b.End.Format("15:04"),
+				fmt.Sprint(b.Requests), fmt.Sprint(b.InputTokens), fmt.Sprint(b.OutputTokens),
+				fmt.Sprint(b.TotalTokens), fmt.Sprint(b.CacheRead), fmt.Sprint(b.Reasoning)})
+		}
+		return nil
+	default:
+		fmt.Fprintf(w, "%-8s  %-8s  %-8s  %-10s  %-10s  %-10s\n", "开始", "结束", "请求", "输入", "输出", "总计")
+		for _, b := range buckets {
+			fmt.Fprintf(w, "%-8s  %-8s  %-8d  %-10s  %-10s  %-10s\n",
+				b.Start.Format("15:04"), b.End.Format("15:04"), b.Requests,
+				human(b.InputTokens), human(b.OutputTokens), human(b.TotalTokens))
+		}
+		return nil
+	}
 }
 
 func newDoctorCmd() *cobra.Command {

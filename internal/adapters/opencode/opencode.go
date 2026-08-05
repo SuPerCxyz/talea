@@ -508,6 +508,7 @@ func (a *Adapter) IterateUsageEvents(
 			Timestamp:       &ts,
 			Sequence:        seq,
 			MessageID:       msgID,
+			Model:           a.messageModel(ctx, db, msgID),
 			InputTokens:     tok.Input,
 			OutputTokens:    tok.Output,
 			TotalTokens:     tok.Total,
@@ -526,6 +527,17 @@ func (a *Adapter) IterateUsageEvents(
 		seq++
 	}
 	return &eventIterator{events: events}, nil
+}
+
+// messageModel 从消息 data 提取模型名。
+func (a *Adapter) messageModel(ctx context.Context, db *sql.DB, msgID string) string {
+	var raw string
+	err := db.QueryRowContext(ctx,
+		`SELECT json_extract(data, '$.modelID') FROM message WHERE id=?`, msgID).Scan(&raw)
+	if err != nil || raw == "" {
+		return ""
+	}
+	return raw
 }
 
 // messagePreview 提取消息文本摘要。
