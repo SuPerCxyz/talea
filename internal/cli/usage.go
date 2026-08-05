@@ -13,6 +13,7 @@ import (
 
 	"github.com/talea/talea/internal/app"
 	"github.com/talea/talea/internal/cli/output"
+	"github.com/talea/talea/internal/cost"
 	"github.com/talea/talea/internal/doctor"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/insights"
@@ -81,6 +82,16 @@ func newUsageCmd() *cobra.Command {
 			fmt.Printf("完整性：%s\n", u.Completeness)
 			if u.IsEstimated {
 				fmt.Println("注：部分数值为估算值")
+			}
+			// 费用估算（仅当配置启用）
+			if a.Config.Usage.EstimateCost {
+				if micros, currency, at, ok := cost.Estimate(u, a.Config.Usage.Pricing); ok {
+					fmt.Printf("估算费用：%s（%s，价格快照 %s）\n",
+						cost.Format(*micros, currency), currency, at.Format("2006-01-02 15:04"))
+					fmt.Println("注：估算费用不替代供应商账单")
+				} else {
+					fmt.Println("估算费用：无法估算（缺少价格表或模型信息）")
+				}
 			}
 
 			if detailsFlag {
@@ -296,7 +307,7 @@ func showInsights(ctx context.Context, db *index.DB, sess *model.Session) error 
 	if err != nil {
 		return err
 	}
-	fmt.Println("会话 Token 洞察\n")
+	fmt.Println("会话 Token 洞察")
 	if len(rep.Insights) == 0 {
 		fmt.Println("未检测到明显异常消耗模式。")
 		return nil

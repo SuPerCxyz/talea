@@ -13,6 +13,7 @@ import (
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/adapters/claude"
 	"github.com/talea/talea/internal/adapters/codex"
+	"github.com/talea/talea/internal/adapters/generic"
 	"github.com/talea/talea/internal/adapters/opencode"
 	"github.com/talea/talea/internal/config"
 	"github.com/talea/talea/internal/model"
@@ -114,6 +115,9 @@ func registerBuiltins(reg *adapters.Registry) error {
 		return err
 	}
 	if err := reg.Register(opencode.New()); err != nil {
+		return err
+	}
+	if err := reg.Register(generic.New()); err != nil {
 		return err
 	}
 	return nil
