@@ -184,6 +184,19 @@ func (db *DB) Migrate(ctx context.Context) error {
 			ON usage_timeline_events (agent_instance_id, session_id, timestamp, sequence)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_agent
 			ON sessions (agent_instance_id, last_activity_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS session_meta (
+			agent_instance_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			favorite INTEGER NOT NULL DEFAULT 0,
+			note TEXT,
+			PRIMARY KEY (agent_instance_id, session_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS session_tags (
+			agent_instance_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			tag TEXT NOT NULL,
+			PRIMARY KEY (agent_instance_id, session_id, tag)
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.sql.ExecContext(ctx, s); err != nil {

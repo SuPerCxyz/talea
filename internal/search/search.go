@@ -151,11 +151,11 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 	var out []Result
 	for rows.Next() {
 		var (
-			s                         model.Session
-			started, ended, last      *int64
-			duration                  *int64
-			wdExists                  int
-			activity                  string
+			s                    model.Session
+			started, ended, last *int64
+			duration             *int64
+			wdExists             int
+			activity             string
 		)
 		if err := rows.Scan(&s.AgentID, &s.AgentInstanceID, &s.SessionID,
 			&s.FirstQuestion, &started, &ended, &last, &duration,

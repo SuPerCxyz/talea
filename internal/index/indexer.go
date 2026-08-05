@@ -127,7 +127,8 @@ func (ix *Indexer) indexTimelineEvents(ctx context.Context, sess *model.Session,
 
 // ResolveSubagentRelations 聚合子 Agent Token 到父会话。
 // 返回聚合的关系数。单条失败不中止。
-func (ix *Indexer) ResolveSubagentRelations(ctx context.Context) (int, error) {	insts, err := ix.App.DetectInstances(ctx)
+func (ix *Indexer) ResolveSubagentRelations(ctx context.Context) (int, error) {
+	insts, err := ix.App.DetectInstances(ctx)
 	if err != nil {
 		return 0, err
 	}
