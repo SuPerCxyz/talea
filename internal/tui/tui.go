@@ -23,9 +23,7 @@ import (
 )
 
 var (
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	itemStyle   = lipgloss.NewStyle().PaddingLeft(2)
-	detailStyle = lipgloss.NewStyle().Padding(1, 2)
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 )
 
 // Run 启动 TUI。
@@ -274,7 +272,7 @@ func (m *mainModel) doResume(s *model.Session) tea.Cmd {
 	}
 	resumer, ok := adapters.As[adapters.Resumer](ad)
 	if !ok {
-		return func() tea.Msg { return resumeErrMsg{err: errors.New("Agent 不支持恢复能力")} }
+		return func() tea.Msg { return resumeErrMsg{err: errors.New("agent 不支持恢复能力")} }
 	}
 	cmd2, err := resumer.BuildResumeCommand(*s, plan.TargetDir)
 	if err != nil {

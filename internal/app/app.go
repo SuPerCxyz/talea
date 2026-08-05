@@ -107,9 +107,15 @@ func (a *App) ResolveWorkingDirs(ctx context.Context, sessions []*model.Session)
 }
 
 func registerBuiltins(reg *adapters.Registry) error {
-	reg.Register(claude.New())
-	reg.Register(codex.New())
-	reg.Register(opencode.New())
+	if err := reg.Register(claude.New()); err != nil {
+		return err
+	}
+	if err := reg.Register(codex.New()); err != nil {
+		return err
+	}
+	if err := reg.Register(opencode.New()); err != nil {
+		return err
+	}
 	return nil
 }
 

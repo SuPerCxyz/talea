@@ -153,7 +153,7 @@ func (t *txIndex) upsertSession(ctx context.Context, s *model.Session) (bool, er
 	if err != nil {
 		return false, err
 	}
-	_, err = res.RowsAffected()
+	_, _ = res.RowsAffected()
 	if s.TokenUsage != nil {
 		if uerr := t.upsertUsage(ctx, s); uerr != nil {
 			return false, uerr

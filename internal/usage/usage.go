@@ -27,15 +27,15 @@ func Load(ctx context.Context, db *index.DB, instanceID, sessionID string) (*mod
 
 func scanUsage(row *sql.Row) (*model.TokenUsage, error) {
 	var (
-		u                   model.TokenUsage
-		input, output, total sql.NullInt64
-		cacheR, cacheW, reason, tool sql.NullInt64
-		reqCount, peak, maxIn, maxOut, maxTot sql.NullInt64
-		self, directChild, desc sql.NullInt64
-		cost sql.NullInt64
-		snapshot sql.NullInt64
+		u                                            model.TokenUsage
+		input, output, total                         sql.NullInt64
+		cacheR, cacheW, reason, tool                 sql.NullInt64
+		reqCount, peak, maxIn, maxOut, maxTot        sql.NullInt64
+		self, directChild, desc                      sql.NullInt64
+		cost                                         sql.NullInt64
+		snapshot                                     sql.NullInt64
 		source, completeness, currency, pricing, raw sql.NullString
-		estimated int
+		estimated                                    int
 	)
 	err := row.Scan(&input, &output, &total,
 		&cacheR, &cacheW, &reason, &tool,

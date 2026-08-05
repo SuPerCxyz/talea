@@ -217,8 +217,8 @@ func (a *Adapter) ParseMetadata(
 		}
 		if line.Type == "response_item" {
 			var item struct {
-				Type    string          `json:"type"`
-				Role    string          `json:"role"`
+				Type    string            `json:"type"`
+				Role    string            `json:"role"`
 				Content []json.RawMessage `json:"content"`
 			}
 			_ = json.Unmarshal(line.Payload, &item)
@@ -302,12 +302,12 @@ func userQuestion(content []json.RawMessage) (string, bool) {
 // tokenCountInfo 是 token_count 事件的 info。
 type tokenCountInfo struct {
 	TotalTokenUsage struct {
-		InputTokens            *int64 `json:"input_tokens"`
-		CachedInputTokens      *int64 `json:"cached_input_tokens"`
-		CacheWriteInputTokens  *int64 `json:"cache_write_input_tokens"`
-		OutputTokens           *int64 `json:"output_tokens"`
-		ReasoningOutputTokens  *int64 `json:"reasoning_output_tokens"`
-		TotalTokens            *int64 `json:"total_tokens"`
+		InputTokens           *int64 `json:"input_tokens"`
+		CachedInputTokens     *int64 `json:"cached_input_tokens"`
+		CacheWriteInputTokens *int64 `json:"cache_write_input_tokens"`
+		OutputTokens          *int64 `json:"output_tokens"`
+		ReasoningOutputTokens *int64 `json:"reasoning_output_tokens"`
+		TotalTokens           *int64 `json:"total_tokens"`
 	} `json:"total_token_usage"`
 }
 
@@ -423,8 +423,8 @@ func (a *Adapter) LoadMessages(
 			continue
 		}
 		var item struct {
-			Type    string           `json:"type"`
-			Role    string           `json:"role"`
+			Type    string            `json:"type"`
+			Role    string            `json:"role"`
 			Content []json.RawMessage `json:"content"`
 		}
 		if err := json.Unmarshal(line.Payload, &item); err != nil || item.Type != "message" {

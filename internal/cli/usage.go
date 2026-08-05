@@ -196,8 +196,8 @@ func newTimelineCmd() *cobra.Command {
 
 func newDoctorCmd() *cobra.Command {
 	var (
-		jsonFlag   bool
-		agentFlag  string
+		jsonFlag  bool
+		agentFlag string
 	)
 	cmd := &cobra.Command{
 		Use:   "doctor",
@@ -302,12 +302,12 @@ func writeEvents(w io.Writer, events []timeline.Event, format output.Format) err
 		views := make([]map[string]any, 0, len(events))
 		for _, e := range events {
 			views = append(views, map[string]any{
-				"time":     fmtTS(e.Timestamp),
-				"type":     string(e.EventType),
-				"model":    e.Model,
-				"total":    ptrValue(e.TotalTokens),
-				"input":    ptrValue(e.InputTokens),
-				"output":   ptrValue(e.OutputTokens),
+				"time":      fmtTS(e.Timestamp),
+				"type":      string(e.EventType),
+				"model":     e.Model,
+				"total":     ptrValue(e.TotalTokens),
+				"input":     ptrValue(e.InputTokens),
+				"output":    ptrValue(e.OutputTokens),
 				"reasoning": ptrValue(e.ReasoningTokens),
 			})
 		}
@@ -376,4 +376,3 @@ func intStr(p *int64) string {
 	}
 	return fmt.Sprint(*p)
 }
-

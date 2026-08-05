@@ -1,0 +1,41 @@
+project_name: talea
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: talea
+    main: ./cmd/talea
+    binary: talea
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X github.com/talea/talea/internal/version.Version={{.Version}}
+      - -X github.com/talea/talea/internal/version.Commit={{.Commit}}
+      - -X github.com/talea/talea/internal/version.BuildDate={{.Date}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats: [tar.gz]
+    files:
+      - README.md
+      - LICENSE
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+release:
+  github:
+    owner: superc
+    name: talea

@@ -45,7 +45,9 @@ func newListCmd() *cobra.Command {
 			if err := search.Ensure(ctx, db); err != nil {
 				return err
 			}
-			search.Populate(ctx, db)
+			if err := search.Populate(ctx, db); err != nil {
+				return err
+			}
 
 			q := search.Query{
 				Agent: agentFlag,
@@ -104,11 +106,11 @@ func newListCmd() *cobra.Command {
 
 func newSearchCmd() *cobra.Command {
 	var (
-		agentFlag   string
-		cwdFlag     string
-		sinceFlag   int
-		limitFlag   int
-		formatFlag  string
+		agentFlag  string
+		cwdFlag    string
+		sinceFlag  int
+		limitFlag  int
+		formatFlag string
 	)
 	cmd := &cobra.Command{
 		Use:   "search [关键词]",
@@ -131,14 +133,16 @@ func newSearchCmd() *cobra.Command {
 			if err := search.Ensure(ctx, db); err != nil {
 				return err
 			}
-			search.Populate(ctx, db)
+			if err := search.Populate(ctx, db); err != nil {
+				return err
+			}
 
 			q := search.Query{
-				Term:     args[0],
-				Agent:    agentFlag,
-				Cwd:      cwdFlag,
+				Term:      args[0],
+				Agent:     agentFlag,
+				Cwd:       cwdFlag,
 				SinceDays: sinceFlag,
-				Limit:    limitFlag,
+				Limit:     limitFlag,
 			}
 			results, err := search.Search(ctx, db, q)
 			if err != nil {

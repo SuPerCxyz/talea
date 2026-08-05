@@ -8,19 +8,19 @@ import (
 
 // ANSI 控制序列。
 var (
-	ansiRE       = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[()][0-9A-Za-z]`)
-	csiRE        = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-	oscRE        = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
-	otherEscRE   = regexp.MustCompile(`\x1b[()][0-9A-Za-z]`)
-	controlRE    = regexp.MustCompile(`[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`)
+	ansiRE     = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[()][0-9A-Za-z]`)
+	csiRE      = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	oscRE      = regexp.MustCompile(`\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+	otherEscRE = regexp.MustCompile(`\x1b[()][0-9A-Za-z]`)
+	controlRE  = regexp.MustCompile(`[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`)
 )
 
 // commonSecrets 常见敏感信息正则。
 var (
-	apiKeyRE   = regexp.MustCompile(`(?i)(sk-|pk-|rk-|ak-)[A-Za-z0-9_\-\.]{8,}`)
-	keyEqRE    = regexp.MustCompile(`(?i)(api[_-]?key|secret|password|passwd|token)\s*[:=]\s*[A-Za-z0-9_\-\.]{8,}`)
-	sshKeyRE   = regexp.MustCompile(`-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----`)
-	bearerRE   = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9_\-\.]{8,}`)
+	apiKeyRE    = regexp.MustCompile(`(?i)(sk-|pk-|rk-|ak-)[A-Za-z0-9_\-\.]{8,}`)
+	keyEqRE     = regexp.MustCompile(`(?i)(api[_-]?key|secret|password|passwd|token)\s*[:=]\s*[A-Za-z0-9_\-\.]{8,}`)
+	sshKeyRE    = regexp.MustCompile(`-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----`)
+	bearerRE    = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9_\-\.]{8,}`)
 	basicAuthRE = regexp.MustCompile(`(?i)(https?://)[^:/@\s]+:[^@\s]+@`)
 )
 

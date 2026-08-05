@@ -25,22 +25,22 @@ const (
 
 // SessionView 是列表输出的扁平视图。
 type SessionView struct {
-	Agent              string `json:"agent"`
-	AgentInstance      string `json:"agent_instance"`
-	SessionID          string `json:"session_id"`
-	FirstQuestion      string `json:"first_question"`
-	StartedAt          string `json:"started_at"`
-	EndedAt            string `json:"ended_at"`
-	LastActivityAt     string `json:"last_activity_at"`
-	Duration           string `json:"duration"`
-	WorkingDirectory   string `json:"working_directory"`
-	WorkingDirExists   bool   `json:"working_dir_exists"`
-	GitBranch          string `json:"git_branch"`
-	ProjectName        string `json:"project_name"`
-	Tokens             string `json:"tokens"`
-	HasTokenUsage      bool   `json:"has_token_usage"`
-	IsSubagent         bool   `json:"is_subagent"`
-	Activity           string `json:"activity"`
+	Agent            string `json:"agent"`
+	AgentInstance    string `json:"agent_instance"`
+	SessionID        string `json:"session_id"`
+	FirstQuestion    string `json:"first_question"`
+	StartedAt        string `json:"started_at"`
+	EndedAt          string `json:"ended_at"`
+	LastActivityAt   string `json:"last_activity_at"`
+	Duration         string `json:"duration"`
+	WorkingDirectory string `json:"working_directory"`
+	WorkingDirExists bool   `json:"working_dir_exists"`
+	GitBranch        string `json:"git_branch"`
+	ProjectName      string `json:"project_name"`
+	Tokens           string `json:"tokens"`
+	HasTokenUsage    bool   `json:"has_token_usage"`
+	IsSubagent       bool   `json:"is_subagent"`
+	Activity         string `json:"activity"`
 }
 
 // ViewOf 构造会话视图。

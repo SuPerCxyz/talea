@@ -11,8 +11,8 @@ func TestApplyPathMapping(t *testing.T) {
 		"/home/user/old-projects": "/home/user/projects",
 	}
 	cases := []struct {
-		dir  string
-		want string
+		dir    string
+		want   string
 		mapped bool
 	}{
 		{"/home/user/old-projects", "/home/user/projects", true},
@@ -31,8 +31,8 @@ func TestApplyPathMapping(t *testing.T) {
 
 func TestApplyPathMappingLongestPrefix(t *testing.T) {
 	m := map[string]string{
-		"/data":             "/mnt/data",
-		"/data/sub":         "/mnt/sub",
+		"/data":     "/mnt/data",
+		"/data/sub": "/mnt/sub",
 	}
 	// 最长前缀匹配：/data/sub 优先
 	got, _ := ApplyPathMapping("/data/sub/deep", m)

@@ -54,12 +54,12 @@ func List(ctx context.Context, db *index.DB, q Query) ([]Event, error) {
 	for rows.Next() {
 		var e Event
 		var (
-			ts, dur, in, ot, tot sql.NullInt64
+			ts, dur, in, ot, tot         sql.NullInt64
 			cacheR, cacheW, reason, tool sql.NullInt64
-			ctxB, ctxA, ctxL sql.NullInt64
-			cumIn, cumOut, cumTot sql.NullInt64
-			estimated int
-			raw, sourceIdentity string
+			ctxB, ctxA, ctxL             sql.NullInt64
+			cumIn, cumOut, cumTot        sql.NullInt64
+			estimated                    int
+			raw, sourceIdentity          string
 		)
 		if err := rows.Scan(&e.EventID, &e.EventType, &ts, &e.Sequence, &dur,
 			&e.RequestID, &e.ResponseID, &e.MessageID, &e.ParentMessageID,

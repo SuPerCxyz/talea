@@ -13,15 +13,15 @@ import (
 
 // Exit 码约定。
 const (
-	ExitOK           = 0
-	ExitError        = 1
-	ExitUsage        = 2
-	ExitNotFound     = 3
-	ExitAgentMissing = 4
-	ExitNoWorkdir    = 5
-	ExitFormatUnsup  = 6
-	ExitIndexCorrupt = 7
-	ExitCapMissing   = 8
+	ExitOK             = 0
+	ExitError          = 1
+	ExitUsage          = 2
+	ExitNotFound       = 3
+	ExitAgentMissing   = 4
+	ExitNoWorkdir      = 5
+	ExitFormatUnsup    = 6
+	ExitIndexCorrupt   = 7
+	ExitCapMissing     = 8
 	ExitDataIncomplete = 9
 )
 

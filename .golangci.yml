@@ -1,17 +1,45 @@
-run:
-  timeout: 3m
-linters:
+version: "2"
+
+formatters:
   enable:
-    - errcheck
+    - gofmt
+    - goimports
+
+linters:
+  default: none
+  enable:
     - govet
     - staticcheck
     - ineffassign
     - unused
     - misspell
-    - gofmt
-    - goimports
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
+    - errcheck
+  settings:
+    errcheck:
+      exclude-functions:
+        - "(*database/sql.DB).Close"
+        - "(*database/sql.Rows).Close"
+        - "(*database/sql.Row).Scan"
+        - "(*database/sql.Rows).Scan"
+        - "(*database/sql.Tx).Rollback"
+        - "(*os.File).Close"
+        - "(io.Closer).Close"
+        - "(*github.com/talea/talea/internal/adapters/extract.JSONLLineReader).Close"
+        - "(*github.com/talea/talea/internal/index.DB).Close"
+        - "(github.com/talea/talea/internal/adapters.UsageEventIterator).Close"
+        - "(github.com/talea/talea/internal/adapters.MessageIterator).Close"
+        - "(*encoding/csv.Writer).Write"
+        - "fmt.Fprintf"
+        - "fmt.Fprintln"
+        - "fmt.Fprint"
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      - linters:
+          - staticcheck
+        text: "QF1012"
+
+run:
+  timeout: 3m

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/talea/talea/internal/adapters"
@@ -89,9 +88,6 @@ func (d *detailModel) View() string {
 	d.view.SetContent(d.render())
 	return d.view.View()
 }
-
-// doResume 由主模型调用。
-func (d *detailModel) doResume() tea.Cmd { return nil }
 
 var _ = context.Background
 var _ = adapters.Command{}

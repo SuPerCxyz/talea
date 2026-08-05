@@ -46,12 +46,12 @@ func TestTokenString(t *testing.T) {
 
 func TestViewOf(t *testing.T) {
 	s := &model.Session{
-		AgentID:           model.AgentClaudeCode,
-		SessionID:         "abc",
-		FirstQuestion:     "q",
-		WorkingDirectory:  "/home/alice/code/x",
-		WorkingDirExists:  true,
-		Activity:          model.ActivityInactive,
+		AgentID:          model.AgentClaudeCode,
+		SessionID:        "abc",
+		FirstQuestion:    "q",
+		WorkingDirectory: "/home/alice/code/x",
+		WorkingDirExists: true,
+		Activity:         model.ActivityInactive,
 	}
 	v := ViewOf(s)
 	if v.Tokens != "未知" {

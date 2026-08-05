@@ -26,16 +26,16 @@ func newTestDB(t *testing.T) *DB {
 func mkSession(id string) *model.Session {
 	now := time.Now()
 	return &model.Session{
-		AgentID:         model.AgentClaudeCode,
-		AgentInstanceID: "inst-1",
-		SessionID:       id,
-		FirstQuestion:   "问题 " + id,
+		AgentID:          model.AgentClaudeCode,
+		AgentInstanceID:  "inst-1",
+		SessionID:        id,
+		FirstQuestion:    "问题 " + id,
 		WorkingDirectory: "/tmp/proj",
-		StartedAt:       &now,
-		EndedAt:         &now,
-		Activity:        model.ActivityInactive,
-		IndexedAt:       now,
-		UpdatedAt:       now,
+		StartedAt:        &now,
+		EndedAt:          &now,
+		Activity:         model.ActivityInactive,
+		IndexedAt:        now,
+		UpdatedAt:        now,
 	}
 }
 

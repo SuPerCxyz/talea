@@ -16,13 +16,13 @@ import (
 
 // Plan 描述一次恢复的准备结果。
 type Plan struct {
-	Session        model.Session
-	TargetDir      string
-	DirExists      bool
-	DirMapped      bool
-	Command        adapters.Command
-	Binary         string
-	Args           []string
+	Session   model.Session
+	TargetDir string
+	DirExists bool
+	DirMapped bool
+	Command   adapters.Command
+	Binary    string
+	Args      []string
 }
 
 // Resolver 将路径映射应用到目标目录（最长前缀匹配）。

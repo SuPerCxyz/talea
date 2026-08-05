@@ -14,18 +14,18 @@ import (
 func Default() *Config {
 	return &Config{
 		General: General{
-			DefaultSort:         "last_activity",
-			IncludeSubagents:    false,
-			ShowSystemMessages:  false,
-			TimeFormat:          "2006-01-02 15:04",
-			Timezone:            "local",
+			DefaultSort:        "last_activity",
+			IncludeSubagents:   false,
+			ShowSystemMessages: false,
+			TimeFormat:         "2006-01-02 15:04",
+			Timezone:           "local",
 		},
 		Index: Index{
-			MetadataOnly:        false,
+			MetadataOnly:           false,
 			IndexAssistantMessages: true,
-			IndexToolOutput:     false,
-			MaxMessageBytes:     1048576,
-			MaxToolOutputBytes:  262144,
+			IndexToolOutput:        false,
+			MaxMessageBytes:        1048576,
+			MaxToolOutputBytes:     262144,
 		},
 		Agents: map[string]AgentConfig{
 			"claude-code": {Enabled: true},
@@ -33,13 +33,13 @@ func Default() *Config {
 			"opencode":    {Enabled: true},
 		},
 		Search: Search{
-			MaxResults:           200,
-			PreviewMessageLimit:  20,
+			MaxResults:          200,
+			PreviewMessageLimit: 20,
 		},
 		Usage: Usage{
-			Enabled:                  true,
-			StoreRequestDetails:      true,
-			EstimateCost:             false,
+			Enabled:                   true,
+			StoreRequestDetails:       true,
+			EstimateCost:              false,
 			IncludeSubagentsByDefault: false,
 		},
 		Privacy: Privacy{
@@ -51,13 +51,13 @@ func Default() *Config {
 }
 
 type Config struct {
-	General     General                  `toml:"general"`
-	Index       Index                    `toml:"index"`
-	Agents      map[string]AgentConfig   `toml:"agents"`
-	Search      Search                   `toml:"search"`
-	Usage       Usage                    `toml:"usage"`
-	Privacy     Privacy                  `toml:"privacy"`
-	PathMapping map[string]string        `toml:"path_mapping"`
+	General     General                `toml:"general"`
+	Index       Index                  `toml:"index"`
+	Agents      map[string]AgentConfig `toml:"agents"`
+	Search      Search                 `toml:"search"`
+	Usage       Usage                  `toml:"usage"`
+	Privacy     Privacy                `toml:"privacy"`
+	PathMapping map[string]string      `toml:"path_mapping"`
 }
 
 type General struct {
@@ -69,11 +69,11 @@ type General struct {
 }
 
 type Index struct {
-	MetadataOnly            bool   `toml:"metadata_only"`
-	IndexAssistantMessages  bool   `toml:"index_assistant_messages"`
-	IndexToolOutput         bool   `toml:"index_tool_output"`
-	MaxMessageBytes         int64  `toml:"max_message_bytes"`
-	MaxToolOutputBytes      int64  `toml:"max_tool_output_bytes"`
+	MetadataOnly           bool  `toml:"metadata_only"`
+	IndexAssistantMessages bool  `toml:"index_assistant_messages"`
+	IndexToolOutput        bool  `toml:"index_tool_output"`
+	MaxMessageBytes        int64 `toml:"max_message_bytes"`
+	MaxToolOutputBytes     int64 `toml:"max_tool_output_bytes"`
 }
 
 type AgentConfig struct {
@@ -87,10 +87,10 @@ type Search struct {
 }
 
 type Usage struct {
-	Enabled                   bool   `toml:"enabled"`
-	StoreRequestDetails       bool   `toml:"store_request_details"`
-	EstimateCost              bool   `toml:"estimate_cost"`
-	IncludeSubagentsByDefault bool   `toml:"include_subagents_by_default"`
+	Enabled                   bool    `toml:"enabled"`
+	StoreRequestDetails       bool    `toml:"store_request_details"`
+	EstimateCost              bool    `toml:"estimate_cost"`
+	IncludeSubagentsByDefault bool    `toml:"include_subagents_by_default"`
 	Pricing                   Pricing `toml:"pricing"`
 }
 
@@ -99,10 +99,10 @@ type Pricing struct {
 }
 
 type ModelPrice struct {
-	Currency           string  `toml:"currency"`
-	InputPerMillion    float64 `toml:"input_per_million"`
-	OutputPerMillion   float64 `toml:"output_per_million"`
-	CacheReadPerMillion float64 `toml:"cache_read_per_million"`
+	Currency             string  `toml:"currency"`
+	InputPerMillion      float64 `toml:"input_per_million"`
+	OutputPerMillion     float64 `toml:"output_per_million"`
+	CacheReadPerMillion  float64 `toml:"cache_read_per_million"`
 	CacheWritePerMillion float64 `toml:"cache_write_per_million"`
 }
 
@@ -144,9 +144,9 @@ func ResolvePaths() Paths {
 	home := homeDir()
 
 	p := Paths{
-		ConfigDir:  filepath.Join(home, configHome, "talea"),
-		DataDir:    filepath.Join(home, dataHome, "talea"),
-		CacheDir:   filepath.Join(home, cacheHome, "talea"),
+		ConfigDir: filepath.Join(home, configHome, "talea"),
+		DataDir:   filepath.Join(home, dataHome, "talea"),
+		CacheDir:  filepath.Join(home, cacheHome, "talea"),
 	}
 	p.ConfigPath = filepath.Join(p.ConfigDir, "config.toml")
 	p.DBPath = filepath.Join(p.DataDir, "index.db")

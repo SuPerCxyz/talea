@@ -49,12 +49,12 @@ type MessageLoadOptions struct {
 
 // Message 是预览用消息单元。
 type Message struct {
-	Role       string
-	Timestamp  int64
-	Content    string
-	IsSystem   bool
-	ToolName   string
-	HasTool    bool
+	Role      string
+	Timestamp int64
+	Content   string
+	IsSystem  bool
+	ToolName  string
+	HasTool   bool
 }
 
 // MessageIterator 提供消息流式读取。

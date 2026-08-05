@@ -318,8 +318,8 @@ func (a *Adapter) LoadMessages(
 		return nil, err
 	}
 	type msgInfo struct {
-		ID    string
-		Time  int64
+		ID   string
+		Time int64
 	}
 	var msgs []msgInfo
 	for rows.Next() {
@@ -432,9 +432,9 @@ func (a *Adapter) IterateUsageEvents(
 	}
 	for rows.Next() {
 		var (
-			msgID string
+			msgID   string
 			created int64
-			role  string
+			role    string
 		)
 		if err := rows.Scan(&msgID, &created, &role); err != nil {
 			continue
