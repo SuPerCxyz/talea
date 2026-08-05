@@ -83,6 +83,7 @@ talea usage <session-id>        # Token 汇总（--details/--include-subagents/-
 talea timeline <session-id>     # Token 时间线（--group-by/--bucket/--around-peak/--by-model/--context/--insights）
 talea doctor                    # 环境诊断（--json/--agent）
 talea run <agent>               # 包装启动 Agent（记录真实进程时间）
+talea watch                     # 监听 Agent 数据目录，变化时增量索引
 talea web                       # 本地只读 Web 视图（仅 localhost）
 talea tag <session-id> [标签...] # 标签 / 收藏 / 备注
 talea export <文件>             # 导出全部会话（含标签，跨设备迁移）

@@ -185,6 +185,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 - [x] `talea run` 真实进程时间回写（process_start/process_exit）
 - [x] 本地 Web 只读视图（`talea web`，仅 127.0.0.1）
 - [x] 多设备离线导入导出（`talea export` / `talea import`）
+- [x] `talea watch`：fsnotify 监听数据目录 + 事件合并增量索引（可选，非必需）
 
 ## 4. 关键设计决定（已确定）
 

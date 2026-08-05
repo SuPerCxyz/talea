@@ -71,6 +71,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newPreviewCmd())
 	root.AddCommand(newTagCmd())
 	root.AddCommand(newWebCmd())
+	root.AddCommand(newWatchCmd())
 	root.AddCommand(newExportCmd())
 	root.AddCommand(newImportCmd())
 	root.AddCommand(&cobra.Command{
