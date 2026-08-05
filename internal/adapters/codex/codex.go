@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/talea/talea/internal/adapters"
@@ -48,7 +49,8 @@ func (a *Adapter) Info() model.AdapterInfo {
 	}
 }
 
-func versionOf() string {
+// versionOf 缓存版本探测结果，避免每次 Detect 重复启动外部进程。
+var versionOnce = sync.OnceValue(func() string {
 	p, err := exec.LookPath("codex")
 	if err != nil {
 		return ""
@@ -59,7 +61,9 @@ func versionOf() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
+})
+
+func versionOf() string { return versionOnce() }
 
 // Detect 探测本机安装。
 func (a *Adapter) Detect(ctx context.Context) ([]model.AgentInstance, error) {

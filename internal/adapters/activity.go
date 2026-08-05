@@ -59,24 +59,39 @@ type ProcessActivityDetector struct {
 	Executable string // 可执行文件名（不含路径）
 }
 
+// AgentProcessRunning 判断 Agent 是否有任何进程在运行（全会话共享一次）。
+func AgentProcessRunning(execName string) bool {
+	return detectProcessRunning(execName)
+}
+
 // DetectActivity 检测会话活动状态。
 func (d ProcessActivityDetector) DetectActivity(
 	ctx context.Context,
 	session model.Session,
 ) (model.ActivityState, error) {
+	// 进程检测是 O(/proc 全扫描)，批量检测时应由调用方先做一次
+	// AgentProcessRunning 快路径。这里保留单次能力供独立使用。
 	if detectProcessRunning(d.Executable) {
 		return model.ActivityActive, nil
 	}
-	// 文件近期更新 -> 可能进行中
+	return detectByMtime(session), nil
+}
+
+// DetectByMtime 仅按文件更新时间检测（进程已确认无运行）。
+func DetectByMtime(session model.Session) model.ActivityState {
+	return detectByMtime(session)
+}
+
+func detectByMtime(session model.Session) model.ActivityState {
 	if session.SourcePath != "" && session.SourceMtime > 0 {
 		fi, err := os.Stat(session.SourcePath)
 		if err == nil {
 			if time.Since(fi.ModTime()) < 30*time.Second {
-				return model.ActivityPossiblyActive, nil
+				return model.ActivityPossiblyActive
 			}
 		}
 	}
-	return model.ActivityInactive, nil
+	return model.ActivityInactive
 }
 
 var _ ActivityDetector = ProcessActivityDetector{}

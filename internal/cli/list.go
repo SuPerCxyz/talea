@@ -207,6 +207,17 @@ func newIndexCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// 同步全文索引
+			if err := search.Ensure(ctx, db); err != nil {
+				return err
+			}
+			if rebuildFlag {
+				if err := search.Rebuild(ctx, db); err != nil {
+					return err
+				}
+			} else if err := search.Populate(ctx, db); err != nil {
+				return err
+			}
 			if !metadataOnly {
 				ix := &index.Indexer{App: a, DB: db}
 				if n, err := ix.ResolveSubagentRelations(ctx); err == nil && n > 0 {

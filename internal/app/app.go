@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/talea/talea/internal/adapters"
@@ -26,6 +27,11 @@ type App struct {
 	Registry *adapters.Registry
 	Config   *config.Config
 	Paths    config.Paths
+
+	// DetectInstances 结果缓存（5 秒 TTL）
+	detectMu    sync.Mutex
+	detectCache []model.AgentInstance
+	detectAt    time.Time
 }
 
 // New 创建 App。
@@ -58,7 +64,16 @@ func registerPlugins(ctx context.Context, reg *adapters.Registry) {
 }
 
 // DetectInstances 探测全部已启用 Agent 的实例。
+// 结果缓存 5 秒，避免一次索引流程中多次重复启动外部进程探测。
 func (a *App) DetectInstances(ctx context.Context) ([]model.AgentInstance, error) {
+	a.detectMu.Lock()
+	if a.detectCache != nil && time.Since(a.detectAt) < 5*time.Second {
+		out := a.detectCache
+		a.detectMu.Unlock()
+		return out, nil
+	}
+	a.detectMu.Unlock()
+
 	var out []model.AgentInstance
 	for _, ad := range a.Registry.All() {
 		if agentCfg, ok := a.Config.Agents[string(ad.Info().ID)]; ok && !agentCfg.Enabled {
@@ -70,6 +85,11 @@ func (a *App) DetectInstances(ctx context.Context) ([]model.AgentInstance, error
 		}
 		out = append(out, insts...)
 	}
+
+	a.detectMu.Lock()
+	a.detectCache = out
+	a.detectAt = time.Now()
+	a.detectMu.Unlock()
 	return out, nil
 }
 

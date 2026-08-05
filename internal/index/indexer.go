@@ -204,30 +204,65 @@ func (ix *Indexer) loadAllSessions(ctx context.Context) ([]*model.Session, error
 }
 
 // RefreshActivities 重新检测全部会话的活动状态并写回。
+// 性能优化：
+//   - 每个 Agent 只做一次进程检测（O(/proc)）。
+//   - 无任何 Agent 进程运行时，单条 SQL 批量标记 inactive。
+//   - 有进程运行时，仅在受影响 Agent 的会话上按文件 mtime 判定。
 func (ix *Indexer) RefreshActivities(ctx context.Context) (int, error) {
-	all, err := ix.loadAllSessions(ctx)
-	if err != nil {
-		return 0, err
+	// 预计算每个 Agent 的进程状态（每个 executable 一次）
+	processActive := map[model.AgentID]bool{}
+	anyActive := false
+	for _, ad := range ix.App.Registry.All() {
+		info := ad.Info()
+		exe := executableOf(info.ID)
+		active := exe != "" && adapters.AgentProcessRunning(exe)
+		processActive[info.ID] = active
+		if active {
+			anyActive = true
+		}
 	}
-	updated := 0
-	for _, s := range all {
-		ad, ok := ix.App.Registry.Get(s.AgentID)
-		if !ok {
-			continue
-		}
-		det, ok := adapters.As[adapters.ActivityDetector](ad)
-		if !ok {
-			continue
-		}
-		state, err := det.DetectActivity(ctx, *s)
+
+	// 无任何 Agent 运行：批量标记 inactive（快路径）
+	if !anyActive {
+		n, err := ix.DB.SetAllActivity(ctx, model.ActivityInactive)
 		if err != nil {
+			return 0, err
+		}
+		return int(n), nil
+	}
+
+	// 有 Agent 运行：先批量标 inactive，再对最近更新的会话标 possibly_active
+	// （单条 SQL，避免逐会话 os.Stat）
+	updated := 0
+	for _, ad := range ix.App.Registry.All() {
+		info := ad.Info()
+		if !processActive[info.ID] {
 			continue
 		}
-		if _, err := ix.DB.SetActivity(ctx, s.AgentInstanceID, s.SessionID, state); err == nil {
-			updated++
+		if _, err := ix.DB.SetAllActivityByAgent(ctx, info.ID, model.ActivityInactive); err != nil {
+			return 0, err
+		}
+		// 最近 30 秒内更新的会话标记为可能进行中
+		n, err := ix.DB.SetRecentActive(ctx, info.ID, 30)
+		if err == nil {
+			updated += int(n)
 		}
 	}
 	return updated, nil
+}
+
+// executableOf 返回 Agent 的进程可执行文件名。
+func executableOf(id model.AgentID) string {
+	switch id {
+	case model.AgentClaudeCode:
+		return "claude"
+	case model.AgentCodexCLI:
+		return "codex"
+	case model.AgentOpenCode:
+		return "opencode"
+	default:
+		return ""
+	}
 }
 
 var _ = adapters.Command{}

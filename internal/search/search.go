@@ -51,7 +51,37 @@ func Ensure(ctx context.Context, db *index.DB) error {
 }
 
 // Populate 全量重建 FTS 表内容。
+// Populate 增量同步 FTS 表：只插入缺失行，不重建。
+// 适用于 list/search 每次调用（O(新行) 而非 O(全表)）。
 func Populate(ctx context.Context, db *index.DB) error {
+	rows, err := db.SQL().QueryContext(ctx,
+		`SELECT s.rowid, s.session_id, s.first_question, s.working_directory, s.project_name, s.git_branch
+		 FROM sessions s
+		 WHERE NOT EXISTS(SELECT 1 FROM session_fts f WHERE f.rowid = s.rowid)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			rid        int
+			sid, fq    string
+			wd, pn, gb string
+		)
+		if err := rows.Scan(&rid, &sid, &fq, &wd, &pn, &gb); err != nil {
+			continue
+		}
+		if _, err := db.SQL().ExecContext(ctx,
+			`INSERT INTO session_fts(rowid, session_id, first_question, working_directory, project_name, git_branch)
+			 VALUES (?,?,?,?,?,?)`, rid, sid, fq, wd, pn, gb); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Rebuild 全量重建 FTS 表（用于 talea index --rebuild）。
+func Rebuild(ctx context.Context, db *index.DB) error {
 	if _, err := db.SQL().ExecContext(ctx, `DELETE FROM session_fts`); err != nil {
 		return err
 	}

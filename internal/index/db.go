@@ -413,6 +413,39 @@ func (db *DB) SetActivity(ctx context.Context, instanceID, sessionID string, sta
 	return n > 0, nil
 }
 
+// SetAllActivityByAgent 批量更新某 Agent 全部会话的活动状态（单条 SQL）。
+func (db *DB) SetAllActivityByAgent(ctx context.Context, agentID model.AgentID, state model.ActivityState) (int64, error) {
+	res, err := db.sql.ExecContext(ctx,
+		`UPDATE sessions SET activity_state = ? WHERE agent_id = ?`,
+		string(state), string(agentID))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// SetAllActivity 批量更新全部会话的活动状态（单条 SQL）。
+func (db *DB) SetAllActivity(ctx context.Context, state model.ActivityState) (int64, error) {
+	res, err := db.sql.ExecContext(ctx,
+		`UPDATE sessions SET activity_state = ?`, string(state))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// SetRecentActive 将最近 n 秒内更新的会话标记为可能进行中（单条 SQL）。
+func (db *DB) SetRecentActive(ctx context.Context, agentID model.AgentID, nSec int64) (int64, error) {
+	res, err := db.sql.ExecContext(ctx,
+		`UPDATE sessions SET activity_state = 'possibly_active'
+		 WHERE agent_id = ? AND source_mtime >= ?`,
+		string(agentID), time.Now().Add(-time.Duration(nSec)*time.Second).Unix())
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func toEpoch(t *time.Time) any {
 	if t == nil {
 		return nil
