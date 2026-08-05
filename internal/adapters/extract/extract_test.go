@@ -2,6 +2,7 @@ package extract
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -104,6 +105,55 @@ func TestJSONLLineReaderBadLine(t *testing.T) {
 	}
 	if obj["type"] != "assistant" {
 		t.Fatalf("got %v", obj["type"])
+	}
+}
+
+func TestLongLineHandled(t *testing.T) {
+	// 超长行（>64KB 默认 buffer）应被 64MB 上限容纳并正确解析
+	dir := t.TempDir()
+	path := dir + "/long.jsonl"
+	longText := strings.Repeat("字", 200*1024) // ~600KB UTF-8
+	content := "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"" + longText + "\"}}\n"
+	writeFile(t, path, content)
+
+	r, err := OpenJSONL(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	obj, ok, err := r.Next()
+	if err != nil {
+		t.Fatalf("long line should parse: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected a line")
+	}
+	if obj["type"] != "user" {
+		t.Fatalf("type=%v", obj["type"])
+	}
+}
+
+func TestTailIncompleteLineTolerant(t *testing.T) {
+	// 末尾不完整行（无换行）：被当作损坏行跳过（ErrBadLine），
+	// 已完成的完整行仍可读取，且不中断后续流程。
+	dir := t.TempDir()
+	path := dir + "/tail.jsonl"
+	writeFile(t, path, "{\"type\":\"user\"}\n{\"type\":\"assistant\"")
+	r, err := OpenJSONL(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	obj, ok, err := r.Next()
+	if err != nil || !ok {
+		t.Fatalf("first line: ok=%v err=%v", ok, err)
+	}
+	if obj["type"] != "user" {
+		t.Fatalf("type=%v", obj["type"])
+	}
+	// 不完整尾行应报损坏错误（ErrBadLine），而不是崩溃
+	if _, ok, err := r.Next(); err == nil || ok {
+		t.Fatalf("incomplete tail should error: ok=%v err=%v", ok, err)
 	}
 }
 
