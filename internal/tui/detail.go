@@ -11,7 +11,9 @@ import (
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
+	"github.com/talea/talea/internal/timeline"
 )
 
 var (
@@ -19,8 +21,141 @@ var (
 	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 )
 
-// buildDetail 渲染会话详情文本。
+// detailModel 是会话详情视图。
+type detailModel struct {
+	ctx   context.Context
+	app   *app.App
+	db    *index.DB
+	sess  *model.Session
+	view  viewport.Model
+	ready bool
+	tab   string // "" 详情, "timeline" Token 时间线, "context" 上下文曲线, "model" 模型汇总
+}
+
+// render 渲染当前 tab 内容。
 func (d *detailModel) render() string {
+	switch d.tab {
+	case "timeline":
+		return d.renderTimeline()
+	case "context":
+		return d.renderContext()
+	case "model":
+		return d.renderModel()
+	default:
+		return d.renderDetail()
+	}
+}
+
+// renderTimeline 渲染请求级时间线。
+func (d *detailModel) renderTimeline() string {
+	if d.db == nil {
+		return "数据库不可用"
+	}
+	events, err := timeline.List(d.ctx, d.db, timeline.Query{
+		AgentInstanceID: d.sess.AgentInstanceID,
+		SessionID:       d.sess.SessionID,
+		Limit:           200,
+	})
+	if err != nil {
+		return "加载时间线失败：" + err.Error()
+	}
+	if len(events) == 0 {
+		return "该会话没有 Token 时间线数据"
+	}
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("Token 时间线") + "\n\n")
+	for _, e := range events {
+		ts := ""
+		if e.Timestamp != nil {
+			ts = e.Timestamp.Format("15:04:05")
+		}
+		sb.WriteString(fmt.Sprintf("%s  %-18s  %s\n", ts, string(e.EventType), timelineDesc(e)))
+	}
+	sb.WriteString("\n按 h 返回详情")
+	return sb.String()
+}
+
+// renderContext 渲染上下文窗口曲线。
+func (d *detailModel) renderContext() string {
+	if d.db == nil {
+		return "数据库不可用"
+	}
+	pts, err := timeline.ContextCurve(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID, 40)
+	if err != nil {
+		return "加载上下文曲线失败：" + err.Error()
+	}
+	if len(pts) == 0 {
+		return "没有上下文窗口数据"
+	}
+	comps, _ := timeline.DetectCompactions(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID)
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("上下文窗口曲线") + "\n\n")
+	sb.WriteString(fmt.Sprintf("%-10s  %-10s  %-12s\n", "时间", "上下文", "变化"))
+	for _, p := range pts {
+		sb.WriteString(fmt.Sprintf("%-10s  %-10s  %+s\n",
+			time.Unix(p.Timestamp, 0).Format("15:04:05"),
+			humanNum(p.Context), signedHuman(p.Change)))
+	}
+	if len(comps) > 0 {
+		sb.WriteString("\n上下文压缩：\n")
+		for _, c := range comps {
+			label := "明确压缩"
+			if c.IsInferred {
+				label = "可能发生上下文压缩"
+			}
+			sb.WriteString(fmt.Sprintf("  %s → %s（%s）\n", humanNum(c.Before), humanNum(c.After), label))
+		}
+	}
+	sb.WriteString("\n按 h 返回详情")
+	return sb.String()
+}
+
+// renderModel 渲染模型汇总。
+func (d *detailModel) renderModel() string {
+	if d.db == nil {
+		return "数据库不可用"
+	}
+	sums, err := timeline.ByModel(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID)
+	if err != nil {
+		return "加载模型汇总失败：" + err.Error()
+	}
+	if len(sums) == 0 {
+		return "该会话没有模型数据"
+	}
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("按模型汇总") + "\n\n")
+	sb.WriteString(fmt.Sprintf("%-24s  %-8s  %-10s  %-10s  %-10s\n", "模型", "请求", "输入", "输出", "总计"))
+	for _, m := range sums {
+		sb.WriteString(fmt.Sprintf("%-24s  %-8d  %-10s  %-10s  %-10s\n",
+			m.Model, m.Requests, humanNum(m.InputTokens), humanNum(m.OutputTokens), humanNum(m.TotalTokens)))
+	}
+	sb.WriteString("\n按 h 返回详情")
+	return sb.String()
+}
+
+func timelineDesc(e timeline.Event) string {
+	var parts []string
+	if e.TotalTokens != nil {
+		parts = append(parts, fmt.Sprintf("总计 %s", humanNum(*e.TotalTokens)))
+	}
+	if e.InputTokens != nil {
+		parts = append(parts, fmt.Sprintf("输入 %s", humanNum(*e.InputTokens)))
+	}
+	if e.OutputTokens != nil {
+		parts = append(parts, fmt.Sprintf("输出 %s", humanNum(*e.OutputTokens)))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func signedHuman(n int64) string {
+	if n >= 0 {
+		return "+" + humanNum(n)
+	}
+	return "-" + humanNum(-n)
+}
+
+// renderDetail 渲染会话详情文本。
+func (d *detailModel) renderDetail() string {
 	s := d.sess
 	var sb strings.Builder
 
@@ -75,7 +210,7 @@ func (d *detailModel) render() string {
 		sb.WriteString("\n当前 Agent 会话格式未提供 Token 使用数据\n")
 	}
 
-	sb.WriteString("\n\n" + labelStyle.Render("按键：o 恢复  esc 返回  q 退出"))
+	sb.WriteString("\n\n" + labelStyle.Render("按键：t 时间线  c 上下文  m 模型  o 恢复  esc 返回  q 退出"))
 	return sb.String()
 }
 

@@ -56,6 +56,29 @@ func TestItemFilterValue(t *testing.T) {
 	}
 }
 
+func TestDetailRenderEmptyDB(t *testing.T) {
+	d := &detailModel{
+		sess: &model.Session{SessionID: "s", AgentID: model.AgentClaudeCode},
+	}
+	// 无 db 时各 tab 不崩溃
+	d.tab = "timeline"
+	if d.render() == "" {
+		t.Fatal("empty timeline render")
+	}
+	d.tab = "context"
+	if d.render() == "" {
+		t.Fatal("empty context render")
+	}
+	d.tab = "model"
+	if d.render() == "" {
+		t.Fatal("empty model render")
+	}
+	d.tab = ""
+	if d.render() == "" {
+		t.Fatal("empty detail render")
+	}
+}
+
 // 确保 list 类型已使用（避免导入未用）
 var _ list.Item = item{}
 var _ tea.Model = (*mainModel)(nil)

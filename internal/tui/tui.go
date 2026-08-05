@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -75,18 +74,21 @@ type mainModel struct {
 }
 
 type keyMap struct {
-	Open  key.Binding
-	Quit  key.Binding
-	Enter key.Binding
-	Back  key.Binding
+	Open     key.Binding
+	Quit     key.Binding
+	Enter    key.Binding
+	Back     key.Binding
+	Timeline key.Binding
+	Context  key.Binding
+	Model    key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Back, k.Quit}
+	return []key.Binding{k.Enter, k.Timeline, k.Context, k.Back, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Enter, k.Back, k.Quit}}
+	return [][]key.Binding{{k.Enter, k.Timeline, k.Context, k.Model, k.Back, k.Quit}}
 }
 
 type item struct {
@@ -116,10 +118,13 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *ind
 	l.SetFilteringEnabled(true)
 
 	km := keyMap{
-		Open:  key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "恢复会话")),
-		Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "退出")),
-		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "详情")),
-		Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "返回列表")),
+		Open:     key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "恢复会话")),
+		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "退出")),
+		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "详情")),
+		Back:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "返回列表")),
+		Timeline: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "Token 时间线")),
+		Context:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "上下文曲线")),
+		Model:    key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "模型汇总")),
 	}
 	return &mainModel{
 		ctx:      ctx,
@@ -181,15 +186,6 @@ func displayAgent(a model.AgentID) string {
 	}
 }
 
-// detailModel 是会话详情视图。
-type detailModel struct {
-	ctx   context.Context
-	app   *app.App
-	sess  *model.Session
-	view  viewport.Model
-	ready bool
-}
-
 // Init 初始化模型。
 func (m *mainModel) Init() tea.Cmd {
 	return nil
@@ -237,6 +233,18 @@ func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, m.keys.Open):
 		return m, m.resumeDetail()
+	case key.Matches(msg, m.keys.Timeline):
+		m.detail.tab = "timeline"
+		return m, nil
+	case key.Matches(msg, m.keys.Context):
+		m.detail.tab = "context"
+		return m, nil
+	case key.Matches(msg, m.keys.Model):
+		m.detail.tab = "model"
+		return m, nil
+	case key.Matches(msg, key.NewBinding(key.WithKeys("h"))):
+		m.detail.tab = ""
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.detail.view, cmd = m.detail.view.Update(msg)
@@ -307,5 +315,5 @@ func (m *mainModel) View() string {
 
 // doResumeDetail 进入详情页。
 func (m *mainModel) showDetail(s *model.Session) {
-	m.detail = &detailModel{ctx: m.ctx, app: m.app, sess: s}
+	m.detail = &detailModel{ctx: m.ctx, app: m.app, db: m.db, sess: s}
 }
