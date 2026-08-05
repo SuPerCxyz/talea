@@ -393,6 +393,14 @@ func (db *DB) AggregateChildTokens(ctx context.Context, rel model.SessionRelatio
 	return err
 }
 
+// ClearTimelineEvents 清除会话的时间线事件（用于全量重建）。
+func (db *DB) ClearTimelineEvents(ctx context.Context, instanceID, sessionID string) error {
+	_, err := db.sql.ExecContext(ctx,
+		`DELETE FROM usage_timeline_events WHERE agent_instance_id=? AND session_id=?`,
+		instanceID, sessionID)
+	return err
+}
+
 // SetActivity 更新会话活动状态。
 func (db *DB) SetActivity(ctx context.Context, instanceID, sessionID string, state model.ActivityState) (bool, error) {
 	res, err := db.sql.ExecContext(ctx,

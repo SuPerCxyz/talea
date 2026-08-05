@@ -135,10 +135,11 @@ func Aggregate(ctx context.Context, db *index.DB, instanceID, sessionID string) 
 	if err != nil {
 		return s, err
 	}
-	// 会话真实累计：取最后一条 request 事件的总计（OpenCode step-finish 为上下文快照）
+	// 会话真实累计：取最后一条 request 事件的累计上下文
+	// （total_tokens 为上下文快照，或 context_after）
 	var lastTotal sql.NullInt64
 	row = db.SQL().QueryRowContext(ctx, `
-		SELECT total_tokens FROM usage_timeline_events
+		SELECT COALESCE(total_tokens, context_after) FROM usage_timeline_events
 		WHERE agent_instance_id=? AND session_id=? AND event_type='request'
 		ORDER BY timestamp DESC, sequence DESC LIMIT 1`, instanceID, sessionID)
 	if err := row.Scan(&lastTotal); err == nil && lastTotal.Valid {

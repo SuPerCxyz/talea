@@ -52,11 +52,16 @@ func TestParseMetadataSimple(t *testing.T) {
 	if !s.HasTokenUsage || s.TokenUsage == nil {
 		t.Fatal("expected token usage")
 	}
-	if s.TokenUsage.InputTokens == nil || *s.TokenUsage.InputTokens != 6400 {
+	// input 为累计上下文值：取最后非零值 5200
+	if s.TokenUsage.InputTokens == nil || *s.TokenUsage.InputTokens != 5200 {
 		t.Fatalf("input tokens: %v", s.TokenUsage.InputTokens)
 	}
+	// output 为增量：求和 340+1800=2140
 	if s.TokenUsage.OutputTokens == nil || *s.TokenUsage.OutputTokens != 2140 {
 		t.Fatalf("output tokens: %v", s.TokenUsage.OutputTokens)
+	}
+	if s.TokenUsage.TotalTokens == nil || *s.TokenUsage.TotalTokens != 7340 {
+		t.Fatalf("total tokens: %v", s.TokenUsage.TotalTokens)
 	}
 	if s.UserMessageCount != 2 {
 		t.Fatalf("user msg count: %d", s.UserMessageCount)

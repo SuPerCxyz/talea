@@ -209,7 +209,31 @@ func (a *Adapter) ParseMetadata(
 		case "assistant":
 			s.MessageCount++
 			if u := parseUsage(line.Message); u != nil {
-				accumulateUsage(usageSum, u)
+				// input 为累计上下文值，output 为增量
+				if u.InputTokens != nil && *u.InputTokens > 0 {
+					usageSum.InputTokens = u.InputTokens
+				}
+				if u.CacheReadTokens != nil {
+					usageSum.CacheReadTokens = u.CacheReadTokens
+				}
+				if u.CacheWriteTokens != nil {
+					usageSum.CacheWriteTokens = u.CacheWriteTokens
+				}
+				if u.ReasoningTokens != nil {
+					usageSum.ReasoningTokens = addInt(usageSum.ReasoningTokens, u.ReasoningTokens)
+				}
+				if u.OutputTokens != nil {
+					usageSum.OutputTokens = addInt(usageSum.OutputTokens, u.OutputTokens)
+				}
+				if m, ok := u.RawFields["model"].(string); ok && m != "" {
+					if s.FormatVersion == "" {
+						s.FormatVersion = m
+					}
+					if usageSum.RawFields == nil {
+						usageSum.RawFields = map[string]any{}
+					}
+					usageSum.RawFields["model"] = m
+				}
 			}
 		}
 	}
@@ -225,6 +249,10 @@ func (a *Adapter) ParseMetadata(
 			d := lastTs.Sub(*s.StartedAt)
 			s.Duration = &d
 		}
+	}
+	if usageSum.InputTokens != nil && usageSum.OutputTokens != nil {
+		total := *usageSum.InputTokens + *usageSum.OutputTokens
+		usageSum.TotalTokens = &total
 	}
 	if usageSum.TotalTokens != nil || usageSum.InputTokens != nil || usageSum.OutputTokens != nil {
 		s.HasTokenUsage = true
@@ -286,9 +314,13 @@ func parseTime(s string) (time.Time, bool) {
 }
 
 // usageMsg 是 assistant 消息里的 usage 字段。
+// input_tokens 为累计上下文值，output_tokens 为单次增量。
 type usageMsg struct {
-	Input  *int64 `json:"input_tokens"`
-	Output *int64 `json:"output_tokens"`
+	Input         *int64 `json:"input_tokens"`
+	Output        *int64 `json:"output_tokens"`
+	CacheRead     *int64 `json:"cache_read_input_tokens"`
+	CacheCreation *int64 `json:"cache_creation_input_tokens"`
+	Reasoning     *int64 `json:"reasoning_tokens"`
 }
 
 func parseUsage(msg json.RawMessage) *model.TokenUsage {
@@ -297,6 +329,7 @@ func parseUsage(msg json.RawMessage) *model.TokenUsage {
 	}
 	var m struct {
 		Usage usageMsg `json:"usage"`
+		Model string   `json:"model"`
 	}
 	if err := json.Unmarshal(msg, &m); err != nil {
 		return nil
@@ -304,20 +337,16 @@ func parseUsage(msg json.RawMessage) *model.TokenUsage {
 	u := &model.TokenUsage{Source: model.UsageSourceMessageMetadata}
 	u.InputTokens = m.Usage.Input
 	u.OutputTokens = m.Usage.Output
-	if m.Usage.Input != nil && m.Usage.Output != nil {
-		total := *m.Usage.Input + *m.Usage.Output
-		u.TotalTokens = &total
+	u.CacheReadTokens = m.Usage.CacheRead
+	u.CacheWriteTokens = m.Usage.CacheCreation
+	u.ReasoningTokens = m.Usage.Reasoning
+	if m.Model != "" {
+		u.RawFields = map[string]any{"model": m.Model}
 	}
 	if u.InputTokens == nil && u.OutputTokens == nil {
 		return nil
 	}
 	return u
-}
-
-func accumulateUsage(sum, add *model.TokenUsage) {
-	sum.InputTokens = addInt(sum.InputTokens, add.InputTokens)
-	sum.OutputTokens = addInt(sum.OutputTokens, add.OutputTokens)
-	sum.TotalTokens = addInt(sum.TotalTokens, add.TotalTokens)
 }
 
 func addInt(a, b *int64) *int64 {

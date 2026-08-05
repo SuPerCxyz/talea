@@ -88,6 +88,10 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 			}
 			// 时间线事件（独立于会话批处理，单个会话失败不中止）
 			for _, sess := range batch {
+				if ix.Force {
+					// 重建时清除旧事件，避免 INSERT OR IGNORE 保留过期数据
+					_ = ix.DB.ClearTimelineEvents(ctx, sess.AgentInstanceID, sess.SessionID)
+				}
 				if err := ix.indexTimelineEvents(ctx, sess, ad); err != nil {
 					res.Errors++
 					res.ErrorMsgs = append(res.ErrorMsgs, fmt.Sprintf("%s/%s timeline: %v", inst.AgentID, sess.SessionID, err))

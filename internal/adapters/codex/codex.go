@@ -247,8 +247,15 @@ func (a *Adapter) ParseMetadata(
 			}
 			_ = json.Unmarshal(line.Payload, &ev)
 			if ev.Type == "token_count" {
-				if u := parseTokenCount(ev.Info); u != nil {
-					accumulateUsage(usageSum, u)
+				total, _ := parseTokenCount(ev.Info)
+				if total != nil && total.InputTokens != nil && *total.InputTokens > 0 {
+					// total_token_usage 为会话累计值：直接覆盖（取最后一个）
+					usageSum.InputTokens = total.InputTokens
+					usageSum.OutputTokens = total.OutputTokens
+					usageSum.TotalTokens = total.TotalTokens
+					usageSum.CacheReadTokens = total.CacheReadTokens
+					usageSum.CacheWriteTokens = total.CacheWriteTokens
+					usageSum.ReasoningTokens = total.ReasoningTokens
 					requestCount++
 				}
 			}
@@ -302,58 +309,47 @@ func userQuestion(content []json.RawMessage) (string, bool) {
 }
 
 // tokenCountInfo 是 token_count 事件的 info。
+// total_token_usage 为会话累计值，last_token_usage 为本次请求增量。
 type tokenCountInfo struct {
-	TotalTokenUsage struct {
-		InputTokens           *int64 `json:"input_tokens"`
-		CachedInputTokens     *int64 `json:"cached_input_tokens"`
-		CacheWriteInputTokens *int64 `json:"cache_write_input_tokens"`
-		OutputTokens          *int64 `json:"output_tokens"`
-		ReasoningOutputTokens *int64 `json:"reasoning_output_tokens"`
-		TotalTokens           *int64 `json:"total_tokens"`
-	} `json:"total_token_usage"`
+	TotalTokenUsage tokenUsage `json:"total_token_usage"`
+	LastTokenUsage  tokenUsage `json:"last_token_usage"`
 }
 
-func parseTokenCount(info json.RawMessage) *model.TokenUsage {
+type tokenUsage struct {
+	InputTokens           *int64 `json:"input_tokens"`
+	CachedInputTokens     *int64 `json:"cached_input_tokens"`
+	CacheWriteInputTokens *int64 `json:"cache_write_input_tokens"`
+	OutputTokens          *int64 `json:"output_tokens"`
+	ReasoningOutputTokens *int64 `json:"reasoning_output_tokens"`
+	TotalTokens           *int64 `json:"total_tokens"`
+}
+
+// parseTokenCount 返回 (累计值, 本次增量)。累计值用于会话汇总，增量用于请求级。
+func parseTokenCount(info json.RawMessage) (*model.TokenUsage, *model.TokenUsage) {
 	var t tokenCountInfo
 	if err := json.Unmarshal(info, &t); err != nil {
-		return nil
+		return nil, nil
 	}
+	total := tokenUsageToModel(t.TotalTokenUsage)
+	last := tokenUsageToModel(t.LastTokenUsage)
+	if total == nil && last == nil {
+		return nil, nil
+	}
+	return total, last
+}
+
+func tokenUsageToModel(t tokenUsage) *model.TokenUsage {
 	u := &model.TokenUsage{Source: model.UsageSourceMessageMetadata}
-	u.InputTokens = t.TotalTokenUsage.InputTokens
-	u.OutputTokens = t.TotalTokenUsage.OutputTokens
-	u.TotalTokens = t.TotalTokenUsage.TotalTokens
-	u.CacheReadTokens = t.TotalTokenUsage.CachedInputTokens
-	u.CacheWriteTokens = t.TotalTokenUsage.CacheWriteInputTokens
-	u.ReasoningTokens = t.TotalTokenUsage.ReasoningOutputTokens
+	u.InputTokens = t.InputTokens
+	u.OutputTokens = t.OutputTokens
+	u.TotalTokens = t.TotalTokens
+	u.CacheReadTokens = t.CachedInputTokens
+	u.CacheWriteTokens = t.CacheWriteInputTokens
+	u.ReasoningTokens = t.ReasoningOutputTokens
 	if u.InputTokens == nil && u.OutputTokens == nil && u.TotalTokens == nil {
 		return nil
 	}
 	return u
-}
-
-func accumulateUsage(sum, add *model.TokenUsage) {
-	sum.InputTokens = addInt(sum.InputTokens, add.InputTokens)
-	sum.OutputTokens = addInt(sum.OutputTokens, add.OutputTokens)
-	sum.TotalTokens = addInt(sum.TotalTokens, add.TotalTokens)
-	sum.CacheReadTokens = addInt(sum.CacheReadTokens, add.CacheReadTokens)
-	sum.CacheWriteTokens = addInt(sum.CacheWriteTokens, add.CacheWriteTokens)
-	sum.ReasoningTokens = addInt(sum.ReasoningTokens, add.ReasoningTokens)
-}
-
-func addInt(a, b *int64) *int64 {
-	if a == nil && b == nil {
-		return nil
-	}
-	if a == nil {
-		v := *b
-		return &v
-	}
-	if b == nil {
-		v := *a
-		return &v
-	}
-	v := *a + *b
-	return &v
 }
 
 // sessionIDFromFilename 从 rollout-<ts>-<uuid>.jsonl 提取 uuid。
@@ -552,24 +548,31 @@ func (a *Adapter) IterateUsageEvents(
 			}
 			_ = json.Unmarshal(line.Payload, &ev)
 			if ev.Type == "token_count" {
-				u := parseTokenCount(ev.Info)
-				if u == nil {
+				total, last := parseTokenCount(ev.Info)
+				if total == nil {
 					continue
 				}
 				e := &model.UsageTimelineEvent{
-					AgentInstanceID:  s.AgentInstanceID,
-					SessionID:        s.SessionID,
-					EventType:        model.UsageEventRequest,
-					Sequence:         seq,
-					InputTokens:      u.InputTokens,
-					OutputTokens:     u.OutputTokens,
-					TotalTokens:      u.TotalTokens,
-					CacheReadTokens:  u.CacheReadTokens,
-					CacheWriteTokens: u.CacheWriteTokens,
-					ReasoningTokens:  u.ReasoningTokens,
-					Source:           model.UsageSourceMessageMetadata,
-					Completeness:     model.UsageComplete,
-					SourceIdentity:   "codex-req-" + itoa(seq),
+					AgentInstanceID: s.AgentInstanceID,
+					SessionID:       s.SessionID,
+					EventType:       model.UsageEventRequest,
+					Sequence:        seq,
+					Source:          model.UsageSourceMessageMetadata,
+					Completeness:    model.UsageComplete,
+					SourceIdentity:  "codex-req-" + itoa(seq),
+				}
+				// last_token_usage 为本次请求增量（input/output）
+				if last != nil {
+					e.InputTokens = last.InputTokens
+					e.OutputTokens = last.OutputTokens
+					e.ReasoningTokens = last.ReasoningTokens
+					e.CacheReadTokens = last.CacheReadTokens
+					e.CacheWriteTokens = last.CacheWriteTokens
+				}
+				// total_token_usage 为会话累计上下文
+				if total.TotalTokens != nil {
+					e.ContextAfter = total.TotalTokens
+					e.CumulativeTotal = total.TotalTokens
 				}
 				if hasTS {
 					e.Timestamp = &ts
