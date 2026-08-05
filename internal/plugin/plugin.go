@@ -38,9 +38,11 @@ type Client struct {
 
 // request 是协议请求。
 type request struct {
-	Method   string                  `json:"method"`
-	Instance *model.AgentInstance    `json:"instance,omitempty"`
-	Source   *adapters.SessionSource `json:"source,omitempty"`
+	Method   string                       `json:"method"`
+	Instance *model.AgentInstance         `json:"instance,omitempty"`
+	Source   *adapters.SessionSource      `json:"source,omitempty"`
+	Session  *model.Session               `json:"session,omitempty"`
+	Options  *adapters.MessageLoadOptions `json:"options,omitempty"`
 }
 
 // response 是协议响应。
@@ -181,6 +183,92 @@ func (c *Client) Discover(inst model.AgentInstance) ([]adapters.SessionSource, e
 		return nil, err
 	}
 	return sources, nil
+}
+
+// ParseMetadata 解析会话元数据（完整字段）。
+func (c *Client) ParseMetadata(inst model.AgentInstance, src adapters.SessionSource) (*model.Session, error) {
+	raw, err := c.call("parse", &inst, &src)
+	if err != nil {
+		return nil, err
+	}
+	var s model.Session
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// callWith 发送携带 session/options 的请求。
+func (c *Client) callWith(method string, session *model.Session, opts *adapters.MessageLoadOptions) (json.RawMessage, error) {
+	req := request{Method: method, Session: session, Options: opts}
+	line, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	return c.sendLine(line)
+}
+
+// sendLine 写入一行并读取响应。
+func (c *Client) sendLine(line []byte) (json.RawMessage, error) {
+	if _, err := c.stdin.Write(append(line, '\n')); err != nil {
+		return nil, err
+	}
+	if err := c.stdin.Flush(); err != nil {
+		return nil, err
+	}
+	if !c.stdout.Scan() {
+		if err := c.stdout.Err(); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("外部适配器 %s 无响应", c.Path)
+	}
+	var resp response
+	if err := json.Unmarshal(c.stdout.Bytes(), &resp); err != nil {
+		return nil, err
+	}
+	if !resp.OK {
+		return nil, fmt.Errorf("外部适配器 %s: %s", c.Path, resp.Error)
+	}
+	return resp.Result, nil
+}
+
+// LoadMessagesFull 读取消息预览（携带 session + options）。
+func (c *Client) LoadMessagesFull(s model.Session, opts adapters.MessageLoadOptions) ([]adapters.Message, error) {
+	raw, err := c.callWith("messages", &s, &opts)
+	if err != nil {
+		return nil, err
+	}
+	var msgs []adapters.Message
+	if err := json.Unmarshal(raw, &msgs); err != nil {
+		return nil, err
+	}
+	return msgs, nil
+}
+
+// LoadUsage 读取会话 Token 汇总。
+func (c *Client) LoadUsage(s model.Session) (*model.TokenUsage, error) {
+	raw, err := c.callWith("usage", &s, nil)
+	if err != nil {
+		return nil, err
+	}
+	var u model.TokenUsage
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+// IterateUsageEvents 读取时间线事件。
+func (c *Client) IterateUsageEvents(s model.Session) ([]*model.UsageTimelineEvent, error) {
+	raw, err := c.callWith("timeline", &s, nil)
+	if err != nil {
+		return nil, err
+	}
+	var events []*model.UsageTimelineEvent
+	if err := json.Unmarshal(raw, &events); err != nil {
+		return nil, err
+	}
+	return events, nil
 }
 
 // Close 关闭进程。

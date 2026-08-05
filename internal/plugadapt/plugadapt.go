@@ -52,24 +52,95 @@ func (a *Adapter) Discover(ctx context.Context, inst model.AgentInstance) ([]ada
 	return a.client.Discover(inst)
 }
 
-// ParseMetadata 解析元数据（外部协议当前支持 detect/discover/info，
-// 元数据解析由 index 层回退到 Discover 的 SourceID 推断）。
+// ParseMetadata 解析会话元数据（完整字段，走插件 parse 方法）。
+// 若插件不支持 parse 方法，回退到 Discover 提供的基础字段。
 func (a *Adapter) ParseMetadata(
 	ctx context.Context,
 	inst model.AgentInstance,
 	src adapters.SessionSource,
 ) (*model.Session, error) {
-	// 最小可用实现：由 Discover 提供的字段构造 Session
-	return &model.Session{
-		AgentID:         a.info.ID,
-		AgentInstanceID: inst.InstanceID,
-		SessionID:       src.SessionID,
-		SourcePath:      src.Path,
-		SourceID:        src.SourceID,
-		SourceMtime:     src.Mtime,
-		SourceSize:      src.Size,
-	}, nil
+	a.mu.Lock()
+	s, err := a.client.ParseMetadata(inst, src)
+	a.mu.Unlock()
+	if err != nil {
+		// 插件不支持 parse 时回退基础字段
+		return &model.Session{
+			AgentID:         a.info.ID,
+			AgentInstanceID: inst.InstanceID,
+			SessionID:       src.SessionID,
+			SourcePath:      src.Path,
+			SourceID:        src.SourceID,
+			SourceMtime:     src.Mtime,
+			SourceSize:      src.Size,
+		}, nil
+	}
+	return s, nil
 }
+
+// LoadMessages 读取消息预览（走插件 messages 方法）。
+func (a *Adapter) LoadMessages(
+	ctx context.Context,
+	s model.Session,
+	opts adapters.MessageLoadOptions,
+) (adapters.MessageIterator, error) {
+	a.mu.Lock()
+	msgs, err := a.client.LoadMessagesFull(s, opts)
+	a.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return &msgIterator{msgs: msgs}, nil
+}
+
+// LoadUsage 读取会话 Token 汇总（走插件 usage 方法）。
+func (a *Adapter) LoadUsage(ctx context.Context, s model.Session) (*model.TokenUsage, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.client.LoadUsage(s)
+}
+
+// IterateUsageEvents 读取时间线事件（走插件 timeline 方法）。
+func (a *Adapter) IterateUsageEvents(ctx context.Context, s model.Session) (adapters.UsageEventIterator, error) {
+	a.mu.Lock()
+	events, err := a.client.IterateUsageEvents(s)
+	a.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return &eventIterator{events: events}, nil
+}
+
+type msgIterator struct {
+	msgs []adapters.Message
+	idx  int
+}
+
+func (it *msgIterator) Next() (adapters.Message, bool, error) {
+	if it.idx >= len(it.msgs) {
+		return adapters.Message{}, false, nil
+	}
+	m := it.msgs[it.idx]
+	it.idx++
+	return m, true, nil
+}
+
+func (it *msgIterator) Close() error { return nil }
+
+type eventIterator struct {
+	events []*model.UsageTimelineEvent
+	idx    int
+}
+
+func (it *eventIterator) Next() (*model.UsageTimelineEvent, bool, error) {
+	if it.idx >= len(it.events) {
+		return nil, false, nil
+	}
+	e := it.events[it.idx]
+	it.idx++
+	return e, true, nil
+}
+
+func (it *eventIterator) Close() error { return nil }
 
 // Close 关闭进程。
 func (a *Adapter) Close() error {

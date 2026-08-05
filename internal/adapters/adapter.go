@@ -9,18 +9,18 @@ import (
 
 // SessionSource 标识一个可解析的会话来源（文件或数据库记录）。
 type SessionSource struct {
-	SessionID string
-	Path      string
-	SourceID  string
-	Mtime     int64
-	Size      int64
-	Offset    int64
+	SessionID string `json:"session_id"`
+	Path      string `json:"path"`
+	SourceID  string `json:"source_id"`
+	Mtime     int64  `json:"mtime"`
+	Size      int64  `json:"size"`
+	Offset    int64  `json:"offset"`
 }
 
 // Command 描述一条要执行的外部命令。
 type Command struct {
-	Program string
-	Args    []string
+	Program string   `json:"program"`
+	Args    []string `json:"args"`
 }
 
 // Adapter 是所有 Agent 适配器必须实现的基础接口。

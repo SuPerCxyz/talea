@@ -14,17 +14,17 @@ const (
 
 // AgentInstance 描述同一个 Agent 的一个安装实例或数据目录。
 type AgentInstance struct {
-	InstanceID string
-	AgentID    AgentID
+	InstanceID string  `json:"instance_id"`
+	AgentID    AgentID `json:"agent_id"`
 
-	DisplayName string
-	Vendor      string
+	DisplayName string `json:"display_name"`
+	Vendor      string `json:"vendor"`
 
-	ExecutablePath string
-	Version        string
+	ExecutablePath string `json:"executable_path"`
+	Version        string `json:"version"`
 
-	DataDirectory string
-	ConfigPath    string
+	DataDirectory string `json:"data_directory"`
+	ConfigPath    string `json:"config_path"`
 }
 
 // Capability 声明适配器支持的能力，界面根据能力动态展示。
@@ -52,10 +52,10 @@ const (
 
 // AdapterInfo 描述适配器的静态信息。
 type AdapterInfo struct {
-	ID           AgentID
-	DisplayName  string
-	Version      string
-	Capabilities []Capability
+	ID           AgentID      `json:"id"`
+	DisplayName  string       `json:"display_name"`
+	Version      string       `json:"version"`
+	Capabilities []Capability `json:"capabilities"`
 }
 
 // TimeSource 记录时间字段的提取来源。
@@ -84,54 +84,54 @@ const (
 
 // Session 是统一会话模型。
 type Session struct {
-	AgentID         AgentID
-	AgentInstanceID string
-	SessionID       string
+	AgentID         AgentID `json:"agent_id"`
+	AgentInstanceID string  `json:"agent_instance_id"`
+	SessionID       string  `json:"session_id"`
 
-	FormatName    string
-	FormatVersion string
+	FormatName    string `json:"format_name"`
+	FormatVersion string `json:"format_version"`
 
-	FirstQuestion           string
-	FirstQuestionSource     string
-	FirstQuestionConfidence float64
+	FirstQuestion           string  `json:"first_question"`
+	FirstQuestionSource     string  `json:"first_question_source"`
+	FirstQuestionConfidence float64 `json:"first_question_confidence"`
 
-	StartedAt       *time.Time
-	EndedAt         *time.Time
-	LastActivityAt  *time.Time
-	Duration        *time.Duration
-	StartTimeSource TimeSource
-	EndTimeSource   TimeSource
+	StartedAt       *time.Time     `json:"started_at"`
+	EndedAt         *time.Time     `json:"ended_at"`
+	LastActivityAt  *time.Time     `json:"last_activity_at"`
+	Duration        *time.Duration `json:"duration"`
+	StartTimeSource TimeSource     `json:"start_time_source"`
+	EndTimeSource   TimeSource     `json:"end_time_source"`
 
-	WorkingDirectory string
-	WorkingDirSource string
-	WorkingDirExists bool
+	WorkingDirectory string `json:"working_directory"`
+	WorkingDirSource string `json:"working_dir_source"`
+	WorkingDirExists bool   `json:"working_dir_exists"`
 
-	ProjectName string
-	GitRoot     string
-	GitBranch   string
-	GitRemote   string
+	ProjectName string `json:"project_name"`
+	GitRoot     string `json:"git_root"`
+	GitBranch   string `json:"git_branch"`
+	GitRemote   string `json:"git_remote"`
 
-	MessageCount     int64
-	UserMessageCount int64
-	ToolCallCount    int64
+	MessageCount     int64 `json:"message_count"`
+	UserMessageCount int64 `json:"user_message_count"`
+	ToolCallCount    int64 `json:"tool_call_count"`
 
-	ParentSessionID string
-	IsSubagent      bool
+	ParentSessionID string `json:"parent_session_id"`
+	IsSubagent      bool   `json:"is_subagent"`
 
-	Activity ActivityState
+	Activity ActivityState `json:"activity_state"`
 
-	SourcePath   string
-	SourceID     string
-	SourceMtime  int64
-	SourceSize   int64
-	SourceOffset int64
+	SourcePath   string `json:"source_path"`
+	SourceID     string `json:"source_id"`
+	SourceMtime  int64  `json:"source_mtime"`
+	SourceSize   int64  `json:"source_size"`
+	SourceOffset int64  `json:"source_offset"`
 
-	HasTokenUsage bool
-	TokenUsage    *TokenUsage
+	HasTokenUsage bool        `json:"has_token_usage"`
+	TokenUsage    *TokenUsage `json:"token_usage,omitempty"`
 
-	ResumeProgram string
-	ResumeArgs    []string
+	ResumeProgram string   `json:"resume_program"`
+	ResumeArgs    []string `json:"resume_args"`
 
-	IndexedAt time.Time
-	UpdatedAt time.Time
+	IndexedAt time.Time `json:"indexed_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
