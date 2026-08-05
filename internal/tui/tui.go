@@ -40,6 +40,9 @@ func Run(ctx context.Context) error {
 	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
+	if err := search.Ensure(ctx, db); err != nil {
+		return err
+	}
 	results, err := search.List(ctx, db, search.Query{Limit: 500})
 	if err != nil {
 		return err

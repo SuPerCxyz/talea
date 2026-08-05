@@ -109,6 +109,9 @@ func newLastCmd() *cobra.Command {
 			if err := db.Migrate(ctx); err != nil {
 				return err
 			}
+			if err := search.Ensure(ctx, db); err != nil {
+				return err
+			}
 			results, err := search.Search(ctx, db, search.Query{Cwd: cwd, Limit: 1})
 			if err != nil {
 				return err
@@ -156,6 +159,9 @@ func findSession(ctx context.Context, a *app.App, id, agent string) (*model.Sess
 	}
 	defer db.Close()
 	if err := db.Migrate(ctx); err != nil {
+		return nil, err
+	}
+	if err := search.Ensure(ctx, db); err != nil {
 		return nil, err
 	}
 	results, err := search.Search(ctx, db, search.Query{Term: id, Agent: agent, Limit: 50})
