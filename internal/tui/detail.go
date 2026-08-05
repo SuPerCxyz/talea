@@ -16,6 +16,7 @@ import (
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/preview"
 	"github.com/talea/talea/internal/timeline"
+	"github.com/talea/talea/internal/usage"
 )
 
 var (
@@ -47,6 +48,10 @@ func (d *detailModel) render() string {
 		return d.renderTurns()
 	case "charts":
 		return d.renderCharts()
+	case "usage":
+		return d.renderUsageSummary()
+	case "subagents":
+		return d.renderSubagents()
 	case "preview":
 		return d.renderPreview()
 	default:
@@ -237,6 +242,78 @@ func (d *detailModel) renderCharts() string {
 	return sb.String()
 }
 
+// renderUsageSummary 渲染 Token 汇总（U 键）。
+func (d *detailModel) renderUsageSummary() string {
+	if d.db == nil {
+		return "数据库不可用"
+	}
+	u, err := usage.Load(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID)
+	if err != nil || u == nil {
+		return "当前 Agent 会话格式未提供 Token 使用数据"
+	}
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("Token 汇总") + "\n\n")
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("输入："), valueStyle.Render(tokenValue(u.InputTokens))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("输出："), valueStyle.Render(tokenValue(u.OutputTokens))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("总计："), valueStyle.Render(tokenValue(u.TotalTokens))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("缓存读："), valueStyle.Render(tokenValue(u.CacheReadTokens))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("缓存写："), valueStyle.Render(tokenValue(u.CacheWriteTokens))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("推理："), valueStyle.Render(tokenValue(u.ReasoningTokens))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("请求数："), valueStyle.Render(tokenValue(u.RequestCount))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("上下文峰值："), valueStyle.Render(tokenValue(u.PeakContextTokens))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("直接子会话："), valueStyle.Render(tokenValue(u.DirectChildTokens))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("所有后代："), valueStyle.Render(tokenValue(u.DescendantTokens))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("数据来源："), valueStyle.Render(string(u.Source))))
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("完整性："), valueStyle.Render(string(u.Completeness))))
+	if u.IsEstimated {
+		sb.WriteString("\n注：部分数值为估算值\n")
+	}
+	sb.WriteString("\n按 h 返回详情")
+	return sb.String()
+}
+
+// renderSubagents 渲染子 Agent 会话汇总（A 键）。
+func (d *detailModel) renderSubagents() string {
+	if d.db == nil {
+		return "数据库不可用"
+	}
+	rows, err := d.db.SQL().QueryContext(d.ctx, `
+		SELECT s.session_id, s.first_question, s.started_at, s.has_token_usage
+		FROM sessions s
+		WHERE s.agent_instance_id = ? AND s.parent_session_id = ?
+		ORDER BY s.started_at ASC`,
+		d.sess.AgentInstanceID, d.sess.SessionID)
+	if err != nil {
+		return "加载子会话失败：" + err.Error()
+	}
+	defer rows.Close()
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("子 Agent 会话") + "\n\n")
+	found := false
+	for rows.Next() {
+		found = true
+		var (
+			sid, fq  string
+			started  *int64
+			hasUsage bool
+		)
+		if err := rows.Scan(&sid, &fq, &started, &hasUsage); err != nil {
+			continue
+		}
+		ts := ""
+		if started != nil {
+			ts = time.Unix(*started, 0).Format("01-02 15:04")
+		}
+		sb.WriteString(fmt.Sprintf("%s  %s  %s\n", ts, truncRunes(sid, 20), truncRunes(firstLine(fq), 40)))
+		_ = hasUsage
+	}
+	if !found {
+		sb.WriteString("该会话没有子 Agent 会话\n")
+	}
+	sb.WriteString("\n按 h 返回详情")
+	return sb.String()
+}
+
 func truncRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
@@ -322,7 +399,7 @@ func (d *detailModel) renderDetail() string {
 		sb.WriteString("\n当前 Agent 会话格式未提供 Token 使用数据\n")
 	}
 
-	sb.WriteString("\n\n" + labelStyle.Render("按键：t 时间线  c 上下文  m 模型  r 轮次  g 图表  p 预览  o 恢复  esc 返回  q 退出"))
+	sb.WriteString("\n\n" + labelStyle.Render("按键：t 时间线  c 上下文  m 模型  r 轮次  g 图表  u 汇总  a 子Agent  p 预览  o 恢复  esc 返回  q 退出"))
 	return sb.String()
 }
 

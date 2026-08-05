@@ -48,6 +48,9 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 
 	var out []Result
 	for _, inst := range insts {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
 		res := Result{AgentID: inst.AgentID}
 		ad, ok := ix.App.Registry.Get(inst.AgentID)
 		if !ok {
@@ -62,6 +65,9 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 		}
 		var batch []*model.Session
 		for _, src := range sources {
+			if err := ctx.Err(); err != nil {
+				return out, err
+			}
 			key := inst.InstanceID + "\x00" + src.SessionID
 			t, known := tracked[key]
 			if known && !ix.Force && t.SourceMtime == src.Mtime && t.SourceSize == src.Size {
@@ -102,6 +108,9 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 			}
 			// 时间线事件（独立于会话批处理，单个会话失败不中止）
 			for _, sess := range batch {
+				if err := ctx.Err(); err != nil {
+					return out, err
+				}
 				if ix.Force {
 					// 重建时清除旧事件，避免 INSERT OR IGNORE 保留过期数据
 					_ = ix.DB.ClearTimelineEvents(ctx, sess.AgentInstanceID, sess.SessionID)

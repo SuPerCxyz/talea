@@ -16,6 +16,7 @@ type Options struct {
 	Limit      int  // 最多消息数
 	ShowSystem bool // 是否显示系统消息
 	Redact     bool // 是否遮罩敏感信息
+	Head       bool // true=取开头 Limit 条，false=取末尾 Limit 条
 }
 
 // MessageView 是渲染用消息单元。
@@ -27,6 +28,7 @@ type MessageView struct {
 }
 
 // Load 通过适配器加载会话消息预览。
+// opts.Limit>0 时返回最后 Limit 条；opts.Head 为 true 时返回最前 Limit 条。
 func Load(ctx context.Context, a adapters.Adapter, s model.Session, opts Options) ([]MessageView, error) {
 	loader, ok := adapters.As[adapters.MessageLoader](a)
 	if !ok {
@@ -36,8 +38,9 @@ func Load(ctx context.Context, a adapters.Adapter, s model.Session, opts Options
 	if limit <= 0 {
 		limit = 20
 	}
+	// 加载全部（Limit=0 不截断），由本层按 head/tail 截取
 	it, err := loader.LoadMessages(ctx, s, adapters.MessageLoadOptions{
-		Limit:      limit,
+		Limit:      0,
 		ShowSystem: opts.ShowSystem,
 	})
 	if err != nil {
@@ -64,6 +67,13 @@ func Load(ctx context.Context, a adapters.Adapter, s model.Session, opts Options
 			Content:   content,
 			IsSystem:  m.IsSystem,
 		})
+	}
+	if opts.Head {
+		if len(out) > limit {
+			out = out[:limit]
+		}
+	} else if len(out) > limit {
+		out = out[len(out)-limit:]
 	}
 	return out, nil
 }

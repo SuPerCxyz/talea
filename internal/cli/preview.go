@@ -14,6 +14,7 @@ func newPreviewCmd() *cobra.Command {
 		agentFlag  string
 		limitFlag  int
 		systemFlag bool
+		tailFlag   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "preview <session-id>",
@@ -33,10 +34,12 @@ func newPreviewCmd() *cobra.Command {
 			if !ok {
 				return exitError{code: ExitFormatUnsup, msg: "会话格式不支持"}
 			}
+			// tail 模式取末尾，默认取开头
 			msgs, err := previewpkg.Load(ctx, ad, *sess, previewpkg.Options{
 				Limit:      limitFlag,
 				ShowSystem: systemFlag,
 				Redact:     a.Config.Privacy.RedactSecretsInPreview,
+				Head:       !tailFlag,
 			})
 			if err != nil {
 				return err
@@ -52,5 +55,6 @@ func newPreviewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
 	cmd.Flags().IntVar(&limitFlag, "limit", 20, "消息条数")
 	cmd.Flags().BoolVar(&systemFlag, "system", false, "包含系统消息")
+	cmd.Flags().BoolVar(&tailFlag, "tail", false, "查看最后几条（默认查看开头）")
 	return cmd
 }
