@@ -79,14 +79,70 @@ talea search "关键词"            # 跨 Agent 全文搜索
 talea open <session-id>         # 恢复会话（--dry-run/--cwd/--agent）
 talea last                      # 当前目录最近会话
 talea index                     # 增量索引（--rebuild/--metadata-only）
-talea usage <session-id>        # Token 汇总（--details/--include-subagents）
-talea timeline <session-id>     # Token 时间线（--group-by/--bucket/--around-peak）
+talea usage <session-id>        # Token 汇总（--details/--include-subagents/--cost）
+talea timeline <session-id>     # Token 时间线（--group-by/--bucket/--around-peak/--by-model/--context/--insights）
 talea doctor                    # 环境诊断（--json/--agent）
+talea run <agent>               # 包装启动 Agent（记录真实进程时间）
 talea config path|init|validate
 talea version
 ```
 
 输出格式支持 `--format table|json|jsonl|csv|markdown`。
+
+## Token 时间线
+
+```text
+# 请求级明细（时间/模型/输入/输出/缓存/总计）
+talea timeline <session-id>
+
+# 按用户轮次聚合
+talea timeline <session-id> --group-by turn
+
+# 5 分钟时间桶
+talea timeline <session-id> --bucket 5m
+
+# 峰值附近
+talea timeline <session-id> --bucket 15m --around-peak
+
+# 按模型汇总
+talea timeline <session-id> --by-model
+
+# 上下文窗口曲线与压缩检测
+talea timeline <session-id> --context
+
+# 本地规则 Token 消耗洞察
+talea timeline <session-id> --insights
+
+# 导出 CSV / Markdown
+talea timeline <session-id> --format csv --output timeline.csv
+```
+
+## Token 洞察
+
+基于本地规则生成可追溯的消耗分析：P95 高消耗请求、上下文超限、
+上下文压缩、短时快速增长、缓存缺失。所有结论可定位到具体事件。
+
+## 费用估算
+
+默认关闭。在 `config.toml` 启用并配置价格表后，`talea usage` 显示估算费用：
+
+```toml
+[usage]
+estimate_cost = true
+
+[usage.pricing.custom-model]
+currency = "USD"
+input_per_million = 3.0
+output_per_million = 15.0
+cache_read_per_million = 0.3
+```
+
+估算使用整数微货币单位，价格带快照时间，不替代供应商账单。
+
+## 父子会话
+
+子 Agent Token 独立保存，默认不合并。`talea index` 自动解析父子关系并
+聚合到 `direct_child_tokens` / `descendant_tokens`。`talea usage` 显示三者。
 
 ## 首次提问
 

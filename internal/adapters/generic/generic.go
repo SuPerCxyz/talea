@@ -112,7 +112,7 @@ func (a *Adapter) ParseMetadata(
 	s := &model.Session{
 		AgentID:         inst.AgentID,
 		AgentInstanceID: inst.InstanceID,
-		SessionID:       sessionIDOf(src),
+		SessionID:       "", // 先读 JSONL 内 sessionId，再回退文件名
 		FormatName:      formatName,
 		SourcePath:      src.Path,
 		SourceID:        src.SourceID,
@@ -166,6 +166,9 @@ func (a *Adapter) ParseMetadata(
 
 	if s.StartedAt == nil {
 		s.StartTimeSource = model.TimeSourceFileMtime
+	}
+	if s.SessionID == "" {
+		s.SessionID = sessionIDOf(src)
 	}
 	if lastTs != nil {
 		s.LastActivityAt = lastTs

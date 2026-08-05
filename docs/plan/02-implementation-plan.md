@@ -149,21 +149,25 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 - [ ] 活动状态、进行中标识
 - [ ] Token 时间线页（P1 完整；P0 预留快捷键）
 
-### Phase 8：P1 — Token 汇总与时间线
+### Phase 8：P1 — Token 汇总与时间线（已完成）
 
-- [ ] `internal/usage`：三 Agent 汇总、delta/cumulative 去重、峰值、子 Agent
-- [ ] `internal/timeline`：事件模型、请求/轮次/上下文/压缩、时间桶、图表聚合
-- [ ] `talea usage --details` / `talea timeline --group-by --bucket --around-peak`
-- [ ] CSV/JSON/Markdown 导出
-- [ ] 费用估算（`[usage]` 配置，默认关，整数微计价单位）
+- [x] `internal/usage`：三 Agent 汇总、delta/cumulative 去重、峰值、子 Agent
+- [x] `internal/timeline`：事件模型、请求/轮次/上下文/压缩、时间桶、图表聚合
+- [x] `talea usage --details` / `talea timeline --group-by --bucket --around-peak`
+- [x] CSV/JSON/Markdown 导出
+- [x] 费用估算（`[usage]` 配置，默认关，整数微计价单位）
+- [x] 本地规则 Token 洞察（`internal/insights`）
+- [x] 按模型汇总 / 上下文曲线 / 压缩检测
+- [x] `talea run`（PID 包装启动）
+- [x] 新增 generic JSONL 适配器作为扩展模板
 
-### Phase 9：质量收尾
+### Phase 9：质量收尾（已完成）
 
-- [ ] golangci-lint 配置 + 全绿
-- [ ] go vet
-- [ ] 性能测试（1000/10000 会话、10 万事件）
-- [ ] 安全测试组
-- [ ] GitHub Actions CI（lint + test + build amd64/arm64）
+- [x] golangci-lint 配置 + 全绿（v2.12.2，0 issues）
+- [x] go vet
+- [x] 性能测试（1000/10000 会话、10 万事件）
+- [x] 安全测试组
+- [x] GitHub Actions CI（lint + test + build amd64/arm64）
 - [ ] GoReleaser 配置
 - [ ] README、privacy、token 文档
 - [ ] `talea doctor` 自检（在真实环境验证三 Agent）
