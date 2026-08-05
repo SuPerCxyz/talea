@@ -11,6 +11,7 @@ import (
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/chart"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/preview"
@@ -44,6 +45,8 @@ func (d *detailModel) render() string {
 		return d.renderModel()
 	case "turns":
 		return d.renderTurns()
+	case "charts":
+		return d.renderCharts()
 	case "preview":
 		return d.renderPreview()
 	default:
@@ -195,6 +198,45 @@ func (d *detailModel) renderTurns() string {
 	return sb.String()
 }
 
+// renderCharts 渲染终端图表（速率柱状图 + 累计曲线）。
+func (d *detailModel) renderCharts() string {
+	if d.db == nil {
+		return "数据库不可用"
+	}
+	buckets, err := timeline.GroupByBucket(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID, timeline.Bucket5m)
+	if err != nil {
+		return "加载图表失败：" + err.Error()
+	}
+	if len(buckets) == 0 {
+		return "该会话没有可聚合的数据"
+	}
+	var sb strings.Builder
+	sb.WriteString(titleStyle.Render("Token 图表") + "\n\n")
+
+	// 速率柱状图
+	vals := make([]float64, len(buckets))
+	labels := make([]string, len(buckets))
+	for i, b := range buckets {
+		vals[i] = float64(b.TotalTokens) / 5.0
+		labels[i] = b.Start.Format("15:04")
+	}
+	sb.WriteString(labelStyle.Render("Token/分钟（每 5 分钟桶）：") + "\n")
+	sb.WriteString(chart.Bar(vals, labels, 6) + "\n\n")
+
+	// 累计曲线
+	cumVals := make([]float64, len(buckets))
+	var cum int64
+	for i, b := range buckets {
+		cum += b.TotalTokens
+		cumVals[i] = float64(cum)
+	}
+	sb.WriteString(labelStyle.Render("累计 Token 曲线：") + "\n")
+	sb.WriteString(chart.Line(cumVals, 50) + "\n")
+
+	sb.WriteString("\n按 h 返回详情")
+	return sb.String()
+}
+
 func truncRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
@@ -280,7 +322,7 @@ func (d *detailModel) renderDetail() string {
 		sb.WriteString("\n当前 Agent 会话格式未提供 Token 使用数据\n")
 	}
 
-	sb.WriteString("\n\n" + labelStyle.Render("按键：t 时间线  c 上下文  m 模型  r 轮次  p 预览  o 恢复  esc 返回  q 退出"))
+	sb.WriteString("\n\n" + labelStyle.Render("按键：t 时间线  c 上下文  m 模型  r 轮次  g 图表  p 预览  o 恢复  esc 返回  q 退出"))
 	return sb.String()
 }
 

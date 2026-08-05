@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/chart"
 	"github.com/talea/talea/internal/cli/output"
 	"github.com/talea/talea/internal/cost"
 	"github.com/talea/talea/internal/doctor"
@@ -28,6 +29,7 @@ func newUsageCmd() *cobra.Command {
 		agentFlag        string
 		detailsFlag      bool
 		includeSubagents bool
+		metricsFlag      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "usage <session-id>",
@@ -52,6 +54,9 @@ func newUsageCmd() *cobra.Command {
 				return err
 			}
 
+			if metricsFlag {
+				return showMetrics(ctx, db, sess)
+			}
 			u, err := usage.Load(ctx, db, sess.AgentInstanceID, sess.SessionID)
 			if err != nil {
 				// 无 usage 记录
@@ -123,7 +128,52 @@ func newUsageCmd() *cobra.Command {
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
 	cmd.Flags().BoolVar(&detailsFlag, "details", false, "显示时间线明细")
 	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, "包含子 Agent")
+	cmd.Flags().BoolVar(&metricsFlag, "metrics", false, "Token 速率与占比指标")
 	return cmd
+}
+
+// showMetrics 展示 Token 速率/缓存/模型占比指标（spec §14.8）。
+func showMetrics(ctx context.Context, db *index.DB, sess *model.Session) error {
+	m, err := timeline.ComputeMetrics(ctx, db, sess.AgentInstanceID, sess.SessionID)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("会话：%s\n", sess.SessionID)
+	fmt.Printf("时长：%s\n", humanDur(m.DurationSeconds))
+	fmt.Printf("Token/分钟：%.0f\n", m.TokenPerMinute)
+	fmt.Printf("累计 Token：%s\n", human(m.CumulativeTotal))
+	fmt.Printf("输入占比：%.1f%%  输出占比：%.1f%%\n", m.InputShare*100, m.OutputShare*100)
+	fmt.Printf("缓存利用率：%.1f%%\n", m.CacheUtilization*100)
+	fmt.Printf("请求数：%d\n", m.Requests)
+	if len(m.ModelShare) > 0 {
+		fmt.Println("\n模型占比：")
+		total := int64(0)
+		for _, v := range m.ModelShare {
+			total += v
+		}
+		if total > 0 {
+			for name, v := range m.ModelShare {
+				fmt.Printf("  %-24s %s %.1f%%\n", truncModel(name), chart.Ratio(float64(v)/float64(total), 20), float64(v)/float64(total)*100)
+			}
+		}
+	}
+	return nil
+}
+
+func humanDur(sec int64) string {
+	if sec <= 0 {
+		return "未知"
+	}
+	h := sec / 3600
+	m := (sec % 3600) / 60
+	s := sec % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%dm%ds", h, m, s)
+	}
+	if m > 0 {
+		return fmt.Sprintf("%dm%ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
 }
 
 func newTimelineCmd() *cobra.Command {
@@ -137,6 +187,7 @@ func newTimelineCmd() *cobra.Command {
 		byModelFlag  bool
 		contextFlag  bool
 		insightsFlag bool
+		chartFlag    string
 	)
 	cmd := &cobra.Command{
 		Use:   "timeline <session-id>",
@@ -170,6 +221,9 @@ func newTimelineCmd() *cobra.Command {
 			}
 			if insightsFlag {
 				return showInsights(ctx, db, sess)
+			}
+			if chartFlag != "" {
+				return showChart(ctx, db, sess, chartFlag)
 			}
 
 			events, err := timeline.List(ctx, db, timeline.Query{
@@ -235,7 +289,65 @@ func newTimelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&byModelFlag, "by-model", false, "按模型汇总")
 	cmd.Flags().BoolVar(&contextFlag, "context", false, "上下文窗口曲线")
 	cmd.Flags().BoolVar(&insightsFlag, "insights", false, "Token 消耗洞察")
+	cmd.Flags().StringVar(&chartFlag, "chart", "", "图表：rate(每桶速率)/cumulative(累计)/context(上下文)")
 	return cmd
+}
+
+// showChart 渲染终端图表。
+func showChart(ctx context.Context, db *index.DB, sess *model.Session, chartKind string) error {
+	switch chartKind {
+	case "rate", "cumulative":
+		return showRateChart(ctx, db, sess, chartKind)
+	case "context":
+		pts, err := timeline.ContextCurve(ctx, db, sess.AgentInstanceID, sess.SessionID, 60)
+		if err != nil {
+			return err
+		}
+		if len(pts) == 0 {
+			return fmt.Errorf("没有上下文数据")
+		}
+		vals := make([]float64, len(pts))
+		for i, p := range pts {
+			vals[i] = float64(p.Context)
+		}
+		fmt.Println("上下文曲线：")
+		fmt.Println(chart.Line(vals, 60))
+		return nil
+	default:
+		return fmt.Errorf("未知图表类型：%s（可用 rate/cumulative/context）", chartKind)
+	}
+}
+
+// showRateChart 渲染每桶 Token 速率柱状图或累计曲线。
+func showRateChart(ctx context.Context, db *index.DB, sess *model.Session, kind string) error {
+	buckets, err := timeline.GroupByBucket(ctx, db, sess.AgentInstanceID, sess.SessionID, timeline.Bucket5m)
+	if err != nil {
+		return err
+	}
+	if len(buckets) == 0 {
+		return fmt.Errorf("没有可聚合的数据")
+	}
+	if kind == "cumulative" {
+		vals := make([]float64, len(buckets))
+		var cum int64
+		for i, b := range buckets {
+			cum += b.TotalTokens
+			vals[i] = float64(cum)
+		}
+		fmt.Println("累计 Token 曲线（每 5 分钟桶）：")
+		fmt.Println(chart.Line(vals, 60))
+		return nil
+	}
+	// rate：每桶 Token，转成 Token/分钟
+	vals := make([]float64, len(buckets))
+	labels := make([]string, len(buckets))
+	for i, b := range buckets {
+		vals[i] = float64(b.TotalTokens) / 5.0
+		labels[i] = b.Start.Format("15:04")
+	}
+	fmt.Println("Token/分钟 柱状图（每 5 分钟桶）：")
+	fmt.Println(chart.Bar(vals, labels, 8))
+	return nil
 }
 
 func showByModel(ctx context.Context, db *index.DB, sess *model.Session, outputFile, formatFlag string) error {

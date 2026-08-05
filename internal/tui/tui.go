@@ -82,15 +82,16 @@ type keyMap struct {
 	Context  key.Binding
 	Model    key.Binding
 	Turns    key.Binding
+	Charts   key.Binding
 	Preview  key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Timeline, k.Turns, k.Preview, k.Back, k.Quit}
+	return []key.Binding{k.Enter, k.Timeline, k.Charts, k.Preview, k.Back, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Enter, k.Timeline, k.Context, k.Model, k.Turns, k.Preview, k.Back, k.Quit}}
+	return [][]key.Binding{{k.Enter, k.Timeline, k.Context, k.Model, k.Turns, k.Charts, k.Preview, k.Back, k.Quit}}
 }
 
 type item struct {
@@ -128,6 +129,7 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *ind
 		Context:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "上下文曲线")),
 		Model:    key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "模型汇总")),
 		Turns:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "用户轮次")),
+		Charts:   key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "图表")),
 		Preview:  key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "对话预览")),
 	}
 	return &mainModel{
@@ -248,6 +250,9 @@ func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, m.keys.Turns):
 		m.detail.tab = "turns"
+		return m, nil
+	case key.Matches(msg, m.keys.Charts):
+		m.detail.tab = "charts"
 		return m, nil
 	case key.Matches(msg, m.keys.Preview):
 		m.detail.tab = "preview"
