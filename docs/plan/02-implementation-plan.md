@@ -154,6 +154,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 - [x] `internal/usage`：三 Agent 汇总、delta/cumulative 去重、峰值、子 Agent
 - [x] `internal/timeline`：事件模型、请求/轮次/上下文/压缩、时间桶、图表聚合
+      （含 terminal chart 包：柱状图/折线图/比例条，usage --metrics 指标）
 - [x] `talea usage --details` / `talea timeline --group-by --bucket --around-peak`
 - [x] CSV/JSON/Markdown 导出
 - [x] 费用估算（`[usage]` 配置，默认关，整数微计价单位）
@@ -167,6 +168,8 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 - [x] golangci-lint 配置 + 全绿（v2.12.2，0 issues）
 - [x] go vet
 - [x] 性能测试（1000/10000 会话、10 万事件）
+      实测（2026-08-06）：10000 会话二次索引 0.82s、list/search 0.7s
+      （含 0.6s 进程冷启动）、10 万事件上下文曲线 0.9s
 - [x] 安全测试组
 - [x] GitHub Actions CI（lint + test + build amd64/arm64）
 - [x] GoReleaser 配置
