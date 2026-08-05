@@ -13,6 +13,7 @@ import (
 	"github.com/talea/talea/internal/app"
 	"github.com/talea/talea/internal/config"
 	"github.com/talea/talea/internal/index"
+	"github.com/talea/talea/internal/model"
 )
 
 func TestIsIgnored(t *testing.T) {
@@ -72,7 +73,11 @@ func TestDataDirs(t *testing.T) {
 	cfg := config.Default()
 	a := &app.App{Registry: reg, Config: cfg, Paths: config.ResolvePaths()}
 
-	dirs := dataDirs(a)
+	// 注入实例，避免依赖真实 Agent 安装（CI runner 无 claude/codex）
+	insts := []model.AgentInstance{
+		{InstanceID: "claude-test", AgentID: model.AgentClaudeCode, DataDirectory: filepath.Join(home, ".claude")},
+	}
+	dirs := dataDirsOf(insts)
 	found := false
 	for _, d := range dirs {
 		if d == filepath.Join(home, ".claude") {
@@ -82,6 +87,7 @@ func TestDataDirs(t *testing.T) {
 	if !found {
 		t.Fatalf("未找到 claude 数据目录: %v", dirs)
 	}
+	_ = a
 }
 
 func TestRunIndexNoPanic(t *testing.T) {

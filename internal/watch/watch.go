@@ -129,6 +129,17 @@ func dataDirs(a *app.App) []string {
 	return dirs
 }
 
+// dataDirsOf 从实例列表提取数据目录（供测试注入，避免依赖真实 Agent 安装）。
+func dataDirsOf(insts []model.AgentInstance) []string {
+	var dirs []string
+	for _, inst := range insts {
+		if inst.DataDirectory != "" {
+			dirs = append(dirs, inst.DataDirectory)
+		}
+	}
+	return dirs
+}
+
 // watchRecursive 递归添加目录监听，depth 限制深度避免过深耗尽 inotify。
 // 默认最多 2 层：数据目录本身 + 其直接子目录（项目目录）。
 // 深层变化依赖定期全量重扫（runIndex 是幂等增量）。
