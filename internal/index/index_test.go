@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,3 +160,51 @@ func TestPermissions(t *testing.T) {
 }
 
 func int64Ptr(v int64) *int64 { return &v }
+
+func TestBackupIfVersionChange(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	// 手动把 schema 版本改成旧版，模拟版本升级场景
+	if _, err := db.sql.ExecContext(ctx,
+		`UPDATE schema_meta SET value='0' WHERE key='schema_version'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// 备份应生成 .bak 文件
+	if err := db.backupIfVersionChange(ctx); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(db.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range entries {
+		if e.Name() == "index.db.v0.bak-"+"x" {
+			continue
+		}
+		if strings.Contains(e.Name(), ".bak-") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("未找到备份文件: %v", entries)
+	}
+}
+
+// 版本一致时不备份
+func TestBackupIfVersionSame(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	// 版本已是 SchemaVersion，不应备份
+	if err := db.backupIfVersionChange(ctx); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(db.dir)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".bak-") {
+			t.Fatalf("不应生成备份: %s", e.Name())
+		}
+	}
+}

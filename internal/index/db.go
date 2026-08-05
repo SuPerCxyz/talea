@@ -60,8 +60,11 @@ func (db *DB) SQL() *sql.DB { return db.sql }
 // Close 关闭数据库。
 func (db *DB) Close() error { return db.sql.Close() }
 
-// Migrate 执行幂等迁移。
+// Migrate 执行幂等迁移。迁移前若检测到 schema 版本变化，先备份旧数据库。
 func (db *DB) Migrate(ctx context.Context) error {
+	if err := db.backupIfVersionChange(ctx); err != nil {
+		return err
+	}
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS schema_meta (
 			key TEXT PRIMARY KEY,
@@ -208,6 +211,38 @@ func (db *DB) Migrate(ctx context.Context) error {
 		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`, fmt.Sprint(SchemaVersion))
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+// backupIfVersionChange 检测到 schema 版本差异时备份旧数据库。
+// 版本相同或数据库不存在时跳过。使用 VACUUM INTO 生成一致快照，权限 0600。
+func (db *DB) backupIfVersionChange(ctx context.Context) error {
+	// schema_meta 可能还不存在（首次迁移），此时无需备份
+	if _, err := db.sql.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+		return err
+	}
+	var curVersion string
+	err := db.sql.QueryRowContext(ctx,
+		`SELECT value FROM schema_meta WHERE key='schema_version'`).Scan(&curVersion)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil // 新库，无备份必要
+		}
+		return err
+	}
+	if curVersion == fmt.Sprint(SchemaVersion) {
+		return nil // 版本一致
+	}
+	// 版本变化：用 VACUUM INTO 生成一致快照备份
+	bakPath := filepath.Join(db.dir,
+		fmt.Sprintf("index.db.v%s.bak-%d", curVersion, time.Now().Unix()))
+	if _, err := db.sql.ExecContext(ctx, `VACUUM INTO ?`, bakPath); err != nil {
+		return fmt.Errorf("备份旧数据库失败: %w", err)
+	}
+	if err := os.Chmod(bakPath, 0o600); err != nil {
+		return fmt.Errorf("设置备份权限 0600: %w", err)
 	}
 	return nil
 }
