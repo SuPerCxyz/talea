@@ -62,6 +62,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newPreviewCmd())
 	root.AddCommand(newTagCmd())
 	root.AddCommand(newWebCmd())
+	root.AddCommand(newExportCmd())
+	root.AddCommand(newImportCmd())
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "版本信息",
