@@ -77,7 +77,45 @@ func Generate(ctx context.Context, db *index.DB, instanceID, sessionID string) (
 		})
 	}
 
+	// 6. 相同文件重复读取
+	if repeats := repeatedFileReads(events); len(repeats) > 0 {
+		for _, f := range repeats {
+			rep.Insights = append(rep.Insights, Insight{
+				Type: "repeated-read",
+				Text: fmt.Sprintf("文件被重复读取 %d 次：%s", f.Count, f.Path),
+			})
+		}
+	}
+
 	return rep, nil
+}
+
+// FileReadStat 记录同一文件的读取次数。
+type FileReadStat struct {
+	Path  string
+	Count int
+}
+
+// repeatedFileReads 检测同一文件被重复读取（≥3 次）。
+func repeatedFileReads(events []timeline.Event) []FileReadStat {
+	counts := map[string]int{}
+	for _, e := range events {
+		if e.EventType == "tool_end" && e.ToolName == "read" && e.FilePath != "" {
+			counts[e.FilePath]++
+		}
+	}
+	var out []FileReadStat
+	for path, n := range counts {
+		if n >= 3 {
+			out = append(out, FileReadStat{Path: path, Count: n})
+		}
+	}
+	// 按次数降序，最多报 5 个
+	sort.Slice(out, func(i, j int) bool { return out[i].Count > out[j].Count })
+	if len(out) > 5 {
+		out = out[:5]
+	}
+	return out
 }
 
 // p95HighRequests 找出超过会话 P95 的请求数。

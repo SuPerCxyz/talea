@@ -8,6 +8,7 @@ import (
 
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
+	"github.com/talea/talea/internal/timeline"
 )
 
 func TestGenerateDetectsGrowth(t *testing.T) {
@@ -96,4 +97,54 @@ func itoa(n int64) string {
 		n /= 10
 	}
 	return string(buf[pos:])
+}
+
+func TestRepeatedFileReads(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now()
+	// 同一文件读取 4 次
+	for i := 0; i < 4; i++ {
+		ts := base.Add(time.Duration(i) * time.Second)
+		db.UpsertTimelineEvent(ctx, &model.UsageTimelineEvent{
+			AgentInstanceID: "i", SessionID: "s",
+			EventType: model.UsageEventToolEnd,
+			Timestamp: &ts, Sequence: int64(i),
+			ToolName: "read", FilePath: "/src/a.go",
+			SourceIdentity: "t-" + itoa(int64(i)),
+		})
+	}
+	// 另一文件读 1 次（不足阈值）
+	ts := base.Add(10 * time.Second)
+	db.UpsertTimelineEvent(ctx, &model.UsageTimelineEvent{
+		AgentInstanceID: "i", SessionID: "s",
+		EventType: model.UsageEventToolEnd,
+		Timestamp: &ts, Sequence: 99,
+		ToolName: "read", FilePath: "/src/b.go",
+		SourceIdentity: "t-99",
+	})
+
+	repeats := repeatedFileReads(mustList(t, ctx, db))
+	if len(repeats) != 1 {
+		t.Fatalf("repeats=%d, want 1", len(repeats))
+	}
+	if repeats[0].Path != "/src/a.go" || repeats[0].Count != 4 {
+		t.Fatalf("repeat=%+v", repeats[0])
+	}
+}
+
+func mustList(t *testing.T, ctx context.Context, db *index.DB) []timeline.Event {
+	t.Helper()
+	evs, err := timeline.List(ctx, db, timeline.Query{AgentInstanceID: "i", SessionID: "s", Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evs
 }

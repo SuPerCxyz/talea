@@ -487,10 +487,53 @@ func (a *Adapter) IterateUsageEvents(
 		var p struct {
 			Type   string          `json:"type"`
 			Tokens json.RawMessage `json:"tokens"`
+			Tool   string          `json:"tool"`
+			CallID string          `json:"callID"`
+			State  json.RawMessage `json:"state"`
 		}
 		if err := json.Unmarshal([]byte(raw), &p); err != nil {
 			continue
 		}
+		ts := time.UnixMilli(created)
+
+		// 工具调用事件：tool part 生成 tool_start/tool_end
+		if p.Type == "tool" {
+			evType := model.UsageEventToolStart
+			filePath := ""
+			if len(p.State) > 0 {
+				var st struct {
+					Status string `json:"status"`
+					Input  struct {
+						FilePath string `json:"filePath"`
+					} `json:"input"`
+				}
+				if json.Unmarshal(p.State, &st) == nil {
+					if st.Status == "completed" {
+						evType = model.UsageEventToolEnd
+					}
+					filePath = st.Input.FilePath
+				}
+			}
+			ev := &model.UsageTimelineEvent{
+				AgentInstanceID: s.AgentInstanceID,
+				SessionID:       s.SessionID,
+				EventID:         partID,
+				EventType:       evType,
+				Timestamp:       &ts,
+				Sequence:        seq,
+				MessageID:       msgID,
+				ToolCallID:      p.CallID,
+				ToolName:        p.Tool,
+				FilePath:        filePath,
+				Source:          model.UsageSourceMessageMetadata,
+				Completeness:    model.UsageComplete,
+				SourceIdentity:  "opencode-tool:" + partID,
+			}
+			events = append(events, ev)
+			seq++
+			continue
+		}
+
 		if p.Type != "step-finish" {
 			continue
 		}
@@ -503,7 +546,7 @@ func (a *Adapter) IterateUsageEvents(
 		if err := json.Unmarshal(p.Tokens, &tok); err != nil {
 			continue
 		}
-		ts := time.UnixMilli(created)
+		ts = time.UnixMilli(created)
 		ev := &model.UsageTimelineEvent{
 			AgentInstanceID: s.AgentInstanceID,
 			SessionID:       s.SessionID,
