@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -52,8 +53,17 @@ func newRunCmd() *cobra.Command {
 				Program: cmd2.Program,
 				Args:    cmd2.Args,
 				Cwd:     cwd,
+				UpdateAfter: func(started, ended time.Time, pid, exitCode int) error {
+					// 更新索引中该目录最近会话的进程时间
+					err := run.UpdateSessionTimes(ctx, inst, cwd, started, ended)
+					if err != nil {
+						return fmt.Errorf("更新会话时间失败: %w", err)
+					}
+					fmt.Fprintf(os.Stderr, "talea run: 会话已更新（PID %d，退出码 %d）\n", pid, exitCode)
+					return nil
+				},
 			}
-			fmt.Fprintf(os.Stderr, "talea run: 启动 %s (PID 将在启动后显示)\n", agentID)
+			fmt.Fprintf(os.Stderr, "talea run: 启动 %s\n", agentID)
 			return r.Run(ctx)
 		},
 	}
