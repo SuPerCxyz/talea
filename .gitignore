@@ -1,0 +1,22 @@
+# Binaries
+bin/
+dist/
+*.exe
+
+# Test artifacts
+*.test
+*.out
+
+# Talea local data (never commit)
+index.db
+index.db-*
+*.db-wal
+*.db-shm
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store

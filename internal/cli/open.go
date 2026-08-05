@@ -1,0 +1,202 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/talea/talea/internal/adapters"
+	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/index"
+	"github.com/talea/talea/internal/model"
+	"github.com/talea/talea/internal/resume"
+	"github.com/talea/talea/internal/search"
+)
+
+func newOpenCmd() *cobra.Command {
+	var (
+		agentFlag  string
+		cwdFlag    string
+		dryRunFlag bool
+	)
+	cmd := &cobra.Command{
+		Use:   "open <session-id>",
+		Short: "恢复会话",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			a, err := app.New(ctx)
+			if err != nil {
+				return err
+			}
+			sess, err := findSession(ctx, a, args[0], agentFlag)
+			if err != nil {
+				return err
+			}
+
+			plan, err := resume.Build(*sess, cwdFlag, a.Config.PathMapping)
+			if err != nil {
+				return err
+			}
+			if !plan.DirExists {
+				fmt.Fprintf(os.Stderr,
+					"无法恢复会话。\n\nAgent：%s\n会话 ID：%s\n原因：原工作目录不存在\n目录：%s\n\n可以执行：\ntalea open %s --cwd <新目录>\n",
+					sess.AgentID, sess.SessionID, plan.TargetDir, sess.SessionID)
+				return exitError{code: ExitNoWorkdir}
+			}
+
+			// 通过适配器构造恢复命令
+			ad, ok := a.Registry.Get(sess.AgentID)
+			if !ok {
+				return exitError{code: ExitFormatUnsup, msg: "会话格式不支持"}
+			}
+			resumer, ok := adapters.As[adapters.Resumer](ad)
+			if !ok {
+				return exitError{code: ExitCapMissing, msg: "Agent 不支持恢复能力"}
+			}
+			cmd2, err := resumer.BuildResumeCommand(*sess, plan.TargetDir)
+			if err != nil {
+				return err
+			}
+			plan.Command = cmd2
+
+			if dryRunFlag {
+				fmt.Printf("Agent：%s\n", displayNameOf(ad))
+				fmt.Printf("目录：%s\n", plan.TargetDir)
+				fmt.Printf("程序：%s\n", plan.Command.Program)
+				fmt.Printf("参数：%s\n", strings.Join(plan.Command.Args, " "))
+				return nil
+			}
+
+			if _, err := resume.ResolveProgram(plan.Command.Program); err != nil {
+				return exitError{code: ExitAgentMissing, msg: err.Error()}
+			}
+			if err := resume.Exec(plan); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "目标目录（覆盖原目录）")
+	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "仅打印恢复命令")
+	return cmd
+}
+
+func newLastCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "last",
+		Short: "当前目录最近会话",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			a, err := app.New(ctx)
+			if err != nil {
+				return err
+			}
+			db, err := index.Open(a.Paths.DBPath)
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+			if err := db.Migrate(ctx); err != nil {
+				return err
+			}
+			results, err := search.Search(ctx, db, search.Query{Cwd: cwd, Limit: 1})
+			if err != nil {
+				return err
+			}
+			if len(results) == 0 {
+				fmt.Println("当前目录没有索引的会话")
+				return nil
+			}
+			sess := &results[0].Session
+			sess.WorkingDirExists = dirExists(sess.WorkingDirectory)
+			sess.Activity = model.ActivityInactive
+			fmt.Printf("Agent：%s\n", sess.AgentID)
+			fmt.Printf("会话 ID：%s\n", sess.SessionID)
+			fmt.Printf("首次提问：%s\n", firstLine(sess.FirstQuestion))
+			if sess.StartedAt != nil {
+				fmt.Printf("开始：%s\n", sess.StartedAt.Format("2006-01-02 15:04"))
+			}
+			if sess.WorkingDirectory != "" {
+				fmt.Printf("目录：%s\n", sess.WorkingDirectory)
+			}
+			return nil
+		},
+	}
+	return cmd
+}
+
+// exitError 携带退出码的错误。
+type exitError struct {
+	code int
+	msg  string
+}
+
+func (e exitError) Error() string {
+	if e.msg != "" {
+		return e.msg
+	}
+	return fmt.Sprintf("退出码 %d", e.code)
+}
+
+// findSession 从索引定位会话（支持前缀匹配）。
+func findSession(ctx context.Context, a *app.App, id, agent string) (*model.Session, error) {
+	db, err := index.Open(a.Paths.DBPath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	if err := db.Migrate(ctx); err != nil {
+		return nil, err
+	}
+	results, err := search.Search(ctx, db, search.Query{Term: id, Agent: agent, Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	for i := range results {
+		s := results[i].Session
+		if s.SessionID == id {
+			s.WorkingDirExists = dirExists(s.WorkingDirectory)
+			return &s, nil
+		}
+	}
+	// 前缀匹配
+	for i := range results {
+		s := results[i].Session
+		if strings.HasPrefix(s.SessionID, id) {
+			s.WorkingDirExists = dirExists(s.WorkingDirectory)
+			return &s, nil
+		}
+	}
+	if len(results) > 0 {
+		return nil, exitError{code: ExitNotFound, msg: fmt.Sprintf("未找到会话 %q", id)}
+	}
+	return nil, exitError{code: ExitNotFound, msg: fmt.Sprintf("未找到会话 %q", id)}
+}
+
+func displayNameOf(ad adapters.Adapter) string {
+	return ad.Info().DisplayName
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+func dirExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
+
+var _ = errors.Is
