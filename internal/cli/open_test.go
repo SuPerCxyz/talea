@@ -3,25 +3,22 @@ package cli
 import (
 	"os"
 	"testing"
+
+	"github.com/talea/talea/internal/model"
 )
 
-func TestMapChoice(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{"1", "mapped"},
-		{"2", "current"},
-		{"3", "view"},
-		{"4", "copy"},
-		{"5", "cancel"},
-		{"x", "cancel"},
-		{"", "cancel"},
+func TestHandleMissingDirNonTTY(t *testing.T) {
+	// 非 TTY 时默认 /tmp
+	sess := &model.Session{SessionID: "abc", FirstQuestion: "q"}
+	dir, action, err := handleMissingDir(sess, "/gone/path", nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		if got := mapChoice(c.in); got != c.want {
-			t.Fatalf("choice %q -> %q, want %q", c.in, got, c.want)
-		}
+	if action != "mapped" {
+		t.Fatalf("action: %q", action)
+	}
+	if dir != "/tmp" {
+		t.Fatalf("dir: %q", dir)
 	}
 }
 
