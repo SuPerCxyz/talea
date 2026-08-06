@@ -58,13 +58,12 @@ func newGoCmd() *cobra.Command {
 
 // goModel 是交互式会话选择器。
 type goModel struct {
-	ctx   context.Context
-	app   *app.App
-	sess  []*model.Session
-	table table.Model
-	help  help.Model
-	keys  goKeys
-	width int
+	sess   []*model.Session
+	table  table.Model
+	help   help.Model
+	keys   goKeys
+	width  int
+	picked int
 }
 
 type goKeys struct {
@@ -105,9 +104,14 @@ func goSelect(ctx context.Context, a *app.App) error {
 	a.SortSessions(sessions)
 
 	m := newGoModel(ctx, a, sessions)
-	p := tea.NewProgram(m)
+	// alt screen：界面全屏且退出时自动恢复终端，避免残留
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		return err
+	}
+	// Bubble Tea 已退出并恢复终端，此时执行选中会话的恢复
+	if m.picked >= 0 && m.picked < len(m.sess) {
+		return resumeSession(ctx, a, m.sess[m.picked], "", false)
 	}
 	return nil
 }
@@ -153,12 +157,11 @@ func newGoModel(ctx context.Context, a *app.App, sessions []*model.Session) *goM
 		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "进入会话")),
 	}
 	return &goModel{
-		ctx:   ctx,
-		app:   a,
-		sess:  sessions,
-		table: t,
-		help:  help.New(),
-		keys:  km,
+		sess:   sessions,
+		table:  t,
+		help:   help.New(),
+		keys:   km,
+		picked: -1,
 	}
 }
 
@@ -179,12 +182,8 @@ func (m *goModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Enter):
 			idx := m.table.Cursor()
 			if idx >= 0 && idx < len(m.sess) {
-				return m, func() tea.Msg {
-					if err := resumeSession(m.ctx, m.app, m.sess[idx], "", false); err != nil {
-						return goErrMsg{err: err}
-					}
-					return goDoneMsg{}
-				}
+				m.picked = idx
+				return m, tea.Quit
 			}
 		}
 	}
@@ -192,10 +191,6 @@ func (m *goModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.table, cmd = m.table.Update(msg)
 	return m, cmd
 }
-
-type goDoneMsg struct{}
-
-type goErrMsg struct{ err error }
 
 func (m *goModel) View() string {
 	var sb strings.Builder
