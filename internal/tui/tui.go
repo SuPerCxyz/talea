@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
@@ -111,6 +110,7 @@ type keyMap struct {
 	Open     key.Binding
 	Quit     key.Binding
 	Enter    key.Binding
+	Detail   key.Binding
 	Back     key.Binding
 	Timeline key.Binding
 	Context  key.Binding
@@ -123,11 +123,11 @@ type keyMap struct {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Timeline, k.Charts, k.Usage, k.Subags, k.Back, k.Quit}
+	return []key.Binding{k.Enter, k.Detail, k.Timeline, k.Charts, k.Usage, k.Subags, k.Back, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Enter, k.Timeline, k.Context, k.Model, k.Turns, k.Charts, k.Usage, k.Subags, k.Preview, k.Back, k.Quit}}
+	return [][]key.Binding{{k.Enter, k.Detail, k.Timeline, k.Context, k.Model, k.Turns, k.Charts, k.Usage, k.Subags, k.Preview, k.Back, k.Quit}}
 }
 
 type item struct {
@@ -159,7 +159,8 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *ind
 	km := keyMap{
 		Open:     key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "恢复会话")),
 		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "退出")),
-		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "详情")),
+		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "进入会话")),
+		Detail:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "详情")),
 		Back:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "返回列表")),
 		Timeline: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "Token 时间线")),
 		Context:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "上下文曲线")),
@@ -196,58 +197,33 @@ func sessionTitle(s *model.Session) string {
 }
 
 func sessionDesc(s *model.Session) string {
-	type seg struct {
-		prefix string
-		value  string
-		alignR bool // 值右对齐固定宽（时长/Token），否则左对齐不限宽
+	var segs []string
+	if s.StartedAt != nil {
+		segs = append(segs, "开始 "+s.StartedAt.Format("01-02 15:04"))
 	}
-	var segs []seg
+	if s.EndedAt != nil {
+		segs = append(segs, "结束 "+s.EndedAt.Format("01-02 15:04"))
+	}
 	if s.Duration != nil {
-		segs = append(segs, seg{"时长", humanDur(*s.Duration), true})
+		segs = append(segs, "时长 "+humanDur(*s.Duration))
 	}
 	if s.TokenUsage != nil && s.TokenUsage.TotalTokens != nil {
-		segs = append(segs, seg{"Token", humanNum(*s.TokenUsage.TotalTokens), true})
+		segs = append(segs, "Token "+humanNum(*s.TokenUsage.TotalTokens))
 	}
 	if s.WorkingDirectory != "" {
-		segs = append(segs, seg{"目录", shortHome(s.WorkingDirectory), false})
+		segs = append(segs, "目录 "+shortHome(s.WorkingDirectory))
+	}
+	if s.GitBranch != "" {
+		segs = append(segs, "分支 "+s.GitBranch)
 	}
 	if s.Activity == model.ActivityActive {
-		segs = append(segs, seg{"状态", "进行中", false})
+		segs = append(segs, "进行中")
 	}
 	if len(segs) == 0 {
 		return s.SessionID
 	}
-	// 前缀固定 6 显示宽；时长/Token 值右对齐 9 宽保证跨行对齐，
-	// 目录等长文本左对齐不限制
-	var sb strings.Builder
-	for i, g := range segs {
-		if i > 0 {
-			sb.WriteString("  ")
-		}
-		sb.WriteString(padDisplay(g.prefix+" ", 6))
-		if g.alignR {
-			sb.WriteString(padLeft(g.value, 9))
-		} else {
-			sb.WriteString(g.value)
-		}
-	}
-	return sb.String()
-}
-
-// padDisplay 左对齐填充到指定显示宽度。
-func padDisplay(s string, w int) string {
-	if runewidth.StringWidth(s) >= w {
-		return s
-	}
-	return s + strings.Repeat(" ", w-runewidth.StringWidth(s))
-}
-
-// padLeft 右对齐填充到指定显示宽度。
-func padLeft(s string, w int) string {
-	if runewidth.StringWidth(s) >= w {
-		return s
-	}
-	return strings.Repeat(" ", w-runewidth.StringWidth(s)) + s
+	// key 与值紧凑排列，段间 2 空格分隔
+	return strings.Join(segs, "  ")
 }
 
 func displayAgent(a model.AgentID) string {
@@ -280,12 +256,12 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
-		case key.Matches(msg, m.keys.Open):
+		case key.Matches(msg, m.keys.Open), key.Matches(msg, m.keys.Enter):
 			if it, ok := m.list.SelectedItem().(item); ok {
 				m.picked = it.sess
 				return m, tea.Quit
 			}
-		case key.Matches(msg, m.keys.Enter):
+		case key.Matches(msg, m.keys.Detail):
 			if it, ok := m.list.SelectedItem().(item); ok {
 				m.showDetail(it.sess)
 			}
