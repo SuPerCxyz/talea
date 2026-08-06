@@ -39,76 +39,7 @@ func newOpenCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-
-			plan, err := resume.Build(*sess, cwdFlag, a.Config.PathMapping)
-			if err != nil {
-				return err
-			}
-			if !plan.DirExists {
-				// 交互处理原目录不存在
-				newTarget, action, err := handleMissingDir(sess, plan.TargetDir, a.Config.PathMapping)
-				if err != nil {
-					return err
-				}
-				switch action {
-				case "cancel":
-					return exitError{code: ExitNoWorkdir, msg: "已取消恢复"}
-				case "view":
-					fmt.Printf("会话 ID：%s\n", sess.SessionID)
-					fmt.Printf("首次提问：%s\n", firstLine(sess.FirstQuestion))
-					return nil
-				case "copy":
-					ad2, _ := a.Registry.Get(sess.AgentID)
-					if resumer, ok := adapters.As[adapters.Resumer](ad2); ok {
-						cmd3, err := resumer.BuildResumeCommand(*sess, plan.TargetDir)
-						if err == nil {
-							fmt.Printf("%s %s\n", cmd3.Program, strings.Join(cmd3.Args, " "))
-						}
-					}
-					return nil
-				case "current":
-					plan.TargetDir, err = os.Getwd()
-					if err != nil {
-						return err
-					}
-				case "mapped":
-					if newTarget != "" {
-						plan.TargetDir = newTarget
-					}
-				}
-				plan.DirExists = dirExists(plan.TargetDir)
-			}
-
-			// 通过适配器构造恢复命令
-			ad, ok := a.Registry.Get(sess.AgentID)
-			if !ok {
-				return exitError{code: ExitFormatUnsup, msg: "会话格式不支持"}
-			}
-			resumer, ok := adapters.As[adapters.Resumer](ad)
-			if !ok {
-				return exitError{code: ExitCapMissing, msg: "Agent 不支持恢复能力"}
-			}
-			cmd2, err := resumer.BuildResumeCommand(*sess, plan.TargetDir)
-			if err != nil {
-				return err
-			}
-			plan.Command = cmd2
-
-			if dryRunFlag {
-				fmt.Printf("Agent：%s\n", displayNameOf(ad))
-				fmt.Printf("目录：%s\n", plan.TargetDir)
-				fmt.Printf("程序：%s\n", plan.Command.Program)
-				fmt.Printf("参数：%s\n", strings.Join(plan.Command.Args, " "))
-				return nil
-			}
-
-			if _, err := resume.ResolveProgram(plan.Command.Program); err != nil {
-				return exitError{code: ExitAgentMissing, msg: err.Error()}
-			}
-			if err := resume.Exec(plan); err != nil {
-				return err
-			}
-			return nil
+			return resumeSession(ctx, a, sess, cwdFlag, dryRunFlag)
 		},
 	}
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
@@ -182,6 +113,75 @@ func mapChoice(line string) string {
 	default:
 		return "cancel"
 	}
+}
+
+// resumeSession 执行会话恢复：构造命令、处理目录缺失、执行或打印。
+// dryRun 为 true 时仅打印命令不执行；返回错误以退出码区分。
+func resumeSession(ctx context.Context, a *app.App, sess *model.Session, cwdFlag string, dryRun bool) error {
+	plan, err := resume.Build(*sess, cwdFlag, a.Config.PathMapping)
+	if err != nil {
+		return err
+	}
+	if !plan.DirExists {
+		newTarget, action, err := handleMissingDir(sess, plan.TargetDir, a.Config.PathMapping)
+		if err != nil {
+			return err
+		}
+		switch action {
+		case "cancel":
+			return exitError{code: ExitNoWorkdir, msg: "已取消恢复"}
+		case "view":
+			fmt.Printf("会话 ID：%s\n", sess.SessionID)
+			fmt.Printf("首次提问：%s\n", firstLine(sess.FirstQuestion))
+			return nil
+		case "copy":
+			ad2, _ := a.Registry.Get(sess.AgentID)
+			if resumer, ok := adapters.As[adapters.Resumer](ad2); ok {
+				cmd3, err := resumer.BuildResumeCommand(*sess, plan.TargetDir)
+				if err == nil {
+					fmt.Printf("%s %s\n", cmd3.Program, strings.Join(cmd3.Args, " "))
+				}
+			}
+			return nil
+		case "current":
+			plan.TargetDir, err = os.Getwd()
+			if err != nil {
+				return err
+			}
+		case "mapped":
+			if newTarget != "" {
+				plan.TargetDir = newTarget
+			}
+		}
+		plan.DirExists = dirExists(plan.TargetDir)
+	}
+
+	ad, ok := a.Registry.Get(sess.AgentID)
+	if !ok {
+		return exitError{code: ExitFormatUnsup, msg: "会话格式不支持"}
+	}
+	resumer, ok := adapters.As[adapters.Resumer](ad)
+	if !ok {
+		return exitError{code: ExitCapMissing, msg: "Agent 不支持恢复能力"}
+	}
+	cmd2, err := resumer.BuildResumeCommand(*sess, plan.TargetDir)
+	if err != nil {
+		return err
+	}
+	plan.Command = cmd2
+
+	if dryRun {
+		fmt.Printf("Agent：%s\n", displayNameOf(ad))
+		fmt.Printf("目录：%s\n", plan.TargetDir)
+		fmt.Printf("程序：%s\n", plan.Command.Program)
+		fmt.Printf("参数：%s\n", strings.Join(plan.Command.Args, " "))
+		return nil
+	}
+
+	if _, err := resume.ResolveProgram(plan.Command.Program); err != nil {
+		return exitError{code: ExitAgentMissing, msg: err.Error()}
+	}
+	return resume.Exec(plan)
 }
 
 // handleMissingDir 交互处理原工作目录不存在的情况。

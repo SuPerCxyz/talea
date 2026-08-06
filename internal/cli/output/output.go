@@ -108,7 +108,23 @@ func activityText(a model.ActivityState) string {
 
 // FormatTokens 将 Token 数值转为可读文本。
 func FormatTokens(u *model.TokenUsage) string {
-	return tokenString(nil)
+	if u == nil {
+		return "未知"
+	}
+	var total int64
+	switch {
+	case u.TotalTokens != nil:
+		total = *u.TotalTokens
+	case u.InputTokens != nil && u.OutputTokens != nil:
+		total = *u.InputTokens + *u.OutputTokens
+	case u.InputTokens != nil:
+		total = *u.InputTokens
+	case u.OutputTokens != nil:
+		total = *u.OutputTokens
+	default:
+		return "未知"
+	}
+	return humanNumber(total)
 }
 
 func tokenString(s *model.Session) string {
@@ -207,7 +223,7 @@ func writeCSV(w io.Writer, views []SessionView) error {
 }
 
 func writeMarkdown(w io.Writer, views []SessionView) error {
-	fmt.Fprintf(w, "| Agent | 开始 | 结束 | 时长 | Token | 目录 | 首次提问 |\n")
+	fmt.Fprintf(w, "| Agent | 开始 | 结束 | Time | Token | 目录 | 首次提问 |\n")
 	fmt.Fprintf(w, "|-------|------|------|------|-------|------|---------|\n")
 	for _, v := range views {
 		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s |\n",
@@ -217,8 +233,8 @@ func writeMarkdown(w io.Writer, views []SessionView) error {
 }
 
 func writeTable(w io.Writer, views []SessionView) error {
-	widths := []int{9, 14, 14, 10, 9, 24, 40}
-	headers := []string{"Agent", "Start", "End", "Duration", "Tokens", "CWD", "First Question"}
+	widths := []int{12, 14, 14, 10, 9, 24, 40}
+	headers := []string{"Agent", "Start", "End", "Time", "Tokens", "CWD", "First Question"}
 	sep := make([]string, len(headers))
 	for i, h := range headers {
 		sep[i] = strings.Repeat("-", len(h))

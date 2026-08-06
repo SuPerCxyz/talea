@@ -61,6 +61,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newListCmd())
 	root.AddCommand(newSearchCmd())
 	root.AddCommand(newOpenCmd())
+	root.AddCommand(newGoCmd())
 	root.AddCommand(newLastCmd())
 	root.AddCommand(newIndexCmd())
 	root.AddCommand(newUsageCmd())
