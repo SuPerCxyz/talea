@@ -66,8 +66,12 @@ func Run(ctx context.Context) error {
 	m := newMain(ctx, a, sessions, db)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
-	if m.errMsg != "" {
-		fmt.Fprintln(os.Stderr, "talea:", m.errMsg)
+	// TUI 已退出并恢复终端，此时再恢复会话，避免在 alt screen 内
+	// 嵌套启动 agent 导致退出后终端错位/光标丢失
+	if m.picked != nil {
+		if rerr := resumeSession(ctx, a, m.picked, "", false); rerr != nil {
+			fmt.Fprintln(os.Stderr, "talea:", rerr)
+		}
 	}
 	return err
 }
@@ -97,17 +101,11 @@ func resumeSession(ctx context.Context, a *app.App, s *model.Session, cwd string
 	return resume.Exec(plan)
 }
 
-// doResume 在 alt screen 回调内直接恢复会话（进程替换后 agent 界面覆盖当前画面）。
+// doResume 记录选中的会话并退出 TUI（Run 返回后恢复，终端已清理）。
 func (m *mainModel) doResume(s *model.Session) tea.Cmd {
-	return func() tea.Msg {
-		if err := resumeSession(m.ctx, m.app, s, "", false); err != nil {
-			return resumeErrMsg{err: err}
-		}
-		return nil
-	}
+	m.picked = s
+	return tea.Quit
 }
-
-type resumeErrMsg struct{ err error }
 
 // mainModel 是主 TUI 模型。
 type mainModel struct {
@@ -121,7 +119,7 @@ type mainModel struct {
 	help     help.Model
 	width    int
 	height   int
-	errMsg   string
+	picked   *model.Session
 }
 
 type keyMap struct {
@@ -303,10 +301,6 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-	case resumeErrMsg:
-		// 恢复失败：记录错误并退出 TUI
-		m.errMsg = msg.err.Error()
-		return m, tea.Quit
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
