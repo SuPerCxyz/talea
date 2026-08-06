@@ -27,6 +27,9 @@ type Command struct {
 type Adapter interface {
 	Info() model.AdapterInfo
 
+	// ID 返回适配器标识（常量，不触发外部探测）。
+	ID() model.AgentID
+
 	Detect(ctx context.Context) ([]model.AgentInstance, error)
 
 	Discover(

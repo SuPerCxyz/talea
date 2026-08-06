@@ -19,6 +19,9 @@ func (f *fakeAdapter) Info() model.AdapterInfo {
 	}
 }
 
+// ID 返回适配器标识。
+func (f *fakeAdapter) ID() model.AgentID { return f.id }
+
 func (f *fakeAdapter) Detect(ctx context.Context) ([]model.AgentInstance, error) {
 	return nil, nil
 }
@@ -100,6 +103,7 @@ func TestAs(t *testing.T) {
 type resumeCapableAdapter struct{}
 
 func (r *resumeCapableAdapter) BuildResumeCommand() string { return "resume" }
+func (r *resumeCapableAdapter) ID() model.AgentID          { return "resume-capable" }
 func (r *resumeCapableAdapter) Info() model.AdapterInfo {
 	return model.AdapterInfo{ID: "resume-capable"}
 }

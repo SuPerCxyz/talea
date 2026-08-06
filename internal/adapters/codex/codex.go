@@ -30,6 +30,9 @@ type Adapter struct{}
 // New 创建适配器。
 func New() *Adapter { return &Adapter{} }
 
+// ID 返回适配器标识（常量，不触发外部探测）。
+func (a *Adapter) ID() model.AgentID { return model.AgentCodexCLI }
+
 // Info 返回适配器信息与能力。
 func (a *Adapter) Info() model.AdapterInfo {
 	return model.AdapterInfo{

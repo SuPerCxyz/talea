@@ -42,10 +42,7 @@ func Run(ctx context.Context) error {
 	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
-	// 启动前增量索引，保证新会话可见
-	if _, err := (&index.Indexer{App: a, DB: db}).Run(ctx); err != nil {
-		return err
-	}
+	// FTS 表同步（快），不阻塞等待增量索引
 	if err := search.Ensure(ctx, db); err != nil {
 		return err
 	}
@@ -120,6 +117,8 @@ type mainModel struct {
 	width    int
 	height   int
 	picked   *model.Session
+	indexing bool
+	indexErr error
 }
 
 type keyMap struct {
@@ -151,14 +150,7 @@ func (i item) FilterValue() string {
 }
 
 func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *index.DB) *mainModel {
-	items := make([]list.Item, 0, len(sessions))
-	for _, s := range sessions {
-		items = append(items, item{
-			title: sessionTitle(s),
-			desc:  sessionDesc(s),
-			sess:  s,
-		})
-	}
+	items := itemsOf(sessions)
 	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Talea · Agent Sessions"
 	l.SetShowStatusBar(true)
@@ -180,6 +172,29 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *ind
 		keys:     km,
 		help:     help.New(),
 	}
+}
+
+// itemsOf 构造列表项。
+func itemsOf(sessions []*model.Session) []list.Item {
+	items := make([]list.Item, 0, len(sessions))
+	for _, s := range sessions {
+		items = append(items, item{
+			title: sessionTitle(s),
+			desc:  sessionDesc(s),
+			sess:  s,
+		})
+	}
+	return items
+}
+
+// indexOf 返回匹配会话 ID 的项下标，未找到返回 0。
+func indexOf(items []list.Item, id string) int {
+	for i, it := range items {
+		if item, ok := it.(item); ok && item.sess.SessionID == id {
+			return i
+		}
+	}
+	return 0
 }
 
 func sessionTitle(s *model.Session) string {
@@ -267,8 +282,27 @@ func displayAgent(a model.AgentID) string {
 
 // Init 初始化模型。
 func (m *mainModel) Init() tea.Cmd {
-	return nil
+	// 后台增量索引，完成后刷新列表（不阻塞启动）
+	m.indexing = true
+	return m.runIndex
 }
+
+// runIndex 后台执行增量索引并刷新列表。
+func (m *mainModel) runIndex() tea.Msg {
+	_, err := (&index.Indexer{App: m.app, DB: m.db}).Run(m.ctx)
+	if err == nil {
+		err = search.Ensure(m.ctx, m.db)
+	}
+	if err == nil {
+		err = search.Populate(m.ctx, m.db)
+	}
+	m.indexing = false
+	m.indexErr = err
+	return indexedMsg{}
+}
+
+// indexedMsg 通知索引完成。
+type indexedMsg struct{}
 
 // Update 处理消息。
 func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -282,6 +316,34 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			m.detail.view.Width = msg.Width
 			m.detail.view.Height = msg.Height - 2
+		}
+		return m, nil
+	case indexedMsg:
+		// 索引完成，刷新会话列表
+		if m.indexErr != nil {
+			return m, nil
+		}
+		if m.detail != nil {
+			return m, nil
+		}
+		results, err := search.List(m.ctx, m.db, search.Query{Limit: 500})
+		if err != nil {
+			return m, nil
+		}
+		sessions := make([]*model.Session, 0, len(results))
+		for i := range results {
+			sessions = append(sessions, &results[i].Session)
+		}
+		m.app.ResolveWorkingDirs(m.ctx, sessions)
+		m.app.SortSessions(sessions)
+		sel := ""
+		if it, ok := m.list.SelectedItem().(item); ok {
+			sel = it.sess.SessionID
+		}
+		m.sessions = sessions
+		m.list.SetItems(itemsOf(sessions))
+		if sel != "" {
+			m.list.Select(indexOf(itemsOf(sessions), sel))
 		}
 		return m, nil
 	case tea.KeyMsg:

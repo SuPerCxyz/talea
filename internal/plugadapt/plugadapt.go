@@ -38,6 +38,9 @@ func New(path string) (*Adapter, error) {
 // Info 返回适配器信息。
 func (a *Adapter) Info() model.AdapterInfo { return a.info }
 
+// ID 返回适配器标识。
+func (a *Adapter) ID() model.AgentID { return a.info.ID }
+
 // Detect 探测实例。
 func (a *Adapter) Detect(ctx context.Context) ([]model.AgentInstance, error) {
 	a.mu.Lock()

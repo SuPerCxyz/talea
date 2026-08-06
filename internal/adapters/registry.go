@@ -23,7 +23,7 @@ func NewRegistry() *Registry {
 func (r *Registry) Register(a Adapter) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	id := a.Info().ID
+	id := a.ID()
 	if _, exists := r.adapters[id]; exists {
 		return fmt.Errorf("适配器 %q 已注册", id)
 	}
