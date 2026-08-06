@@ -21,7 +21,11 @@ import (
 )
 
 func newGoCmd() *cobra.Command {
-	var agentFlag string
+	var (
+		agentFlag  string
+		cwdFlag    string
+		dryRunFlag bool
+	)
 	cmd := &cobra.Command{
 		Use:   "go [session-id]",
 		Short: "交互式选择会话并进入",
@@ -38,7 +42,7 @@ func newGoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return resumeSession(ctx, a, sess, "", false)
+				return resumeSession(ctx, a, sess, cwdFlag, dryRunFlag)
 			}
 			if !isTTY(os.Stdin) {
 				return exitError{code: ExitUsage, msg: "交互式选择需要终端，请指定会话 ID：talea go <session-id>"}
@@ -47,6 +51,8 @@ func newGoCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "目标目录（覆盖原目录）")
+	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "仅打印恢复命令")
 	return cmd
 }
 

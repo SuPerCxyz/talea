@@ -1,6 +1,7 @@
 package output
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -60,4 +61,65 @@ func TestViewOf(t *testing.T) {
 	if v.Activity != "已结束" {
 		t.Fatalf("activity: %q", v.Activity)
 	}
+}
+
+func TestWrapFirst(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		w    int
+		want int // 期望行数
+	}{
+		{name: "short", in: "你好", w: 10, want: 1},
+		{name: "exact", in: "1234567890", w: 10, want: 1},
+		{name: "two lines", in: "中文内容足够长需要换行显示两行内容", w: 10, want: 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := wrapFirst(c.in, c.w)
+			if len(got) != c.want {
+				t.Errorf("wrapFirst(%q,%d) = %d 行 %v, want %d", c.in, c.w, len(got), got, c.want)
+			}
+			for _, line := range got {
+				if runeLen(line) > c.w {
+					t.Errorf("行宽度 %d 超过列宽 %d: %q", runeLen(line), c.w, line)
+				}
+			}
+		})
+	}
+}
+
+func TestWriteTableDynamicWidth(t *testing.T) {
+	sessions := []*model.Session{
+		{
+			AgentID:          model.AgentClaudeCode,
+			SessionID:        "abcdef",
+			FirstQuestion:    strings.Repeat("这是一个很长的问题用于验证表格输出中首次提问列会换行显示为两行且不超过列宽 ", 3),
+			StartedAt:        timePtr(2026, 8, 5, 16, 41),
+			WorkingDirectory: "/home/alice/code/very-long-project-name",
+		},
+	}
+	var buf strings.Builder
+	if err := Write(&buf, sessions, FormatTable); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	// claude-code 应完整显示（不截断）
+	if !strings.Contains(out, "claude-code") {
+		t.Errorf("Agent 列应完整显示 claude-code，实际: %q", out)
+	}
+	// 长目录应完整显示
+	if !strings.Contains(out, "very-long-project-name") {
+		t.Errorf("CWD 应完整显示长目录")
+	}
+	// First Question 应产生两行
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("应有两行输出（表头+分隔+内容2行），实际 %d 行", len(lines))
+	}
+}
+
+func timePtr(y, m, d, h, mi int) *time.Time {
+	t := time.Date(y, time.Month(m), d, h, mi, 0, 0, time.Local)
+	return &t
 }

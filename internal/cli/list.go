@@ -105,7 +105,7 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&activeFlag, "active", false, "仅活动会话")
 	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, "包含子 Agent 会话")
 	cmd.Flags().StringVar(&sortFlag, "sort", "", "排序：last_activity/started_at/tokens/name")
-	cmd.Flags().IntVar(&limitFlag, "limit", 0, "最多条数")
+	cmd.Flags().IntVar(&limitFlag, "limit", 30, "最多条数（默认最近 30 个）")
 	cmd.Flags().StringVar(&formatFlag, "format", "table", "输出格式：table/json/jsonl/csv/markdown")
 	return cmd
 }

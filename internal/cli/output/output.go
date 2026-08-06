@@ -233,23 +233,108 @@ func writeMarkdown(w io.Writer, views []SessionView) error {
 }
 
 func writeTable(w io.Writer, views []SessionView) error {
-	widths := []int{12, 14, 14, 10, 9, 24, 40}
 	headers := []string{"Agent", "Start", "End", "Time", "Tokens", "CWD", "First Question"}
-	sep := make([]string, len(headers))
+	n := len(headers)
+	widths := make([]int, n)
 	for i, h := range headers {
-		sep[i] = strings.Repeat("-", len(h))
-		if widths[i] > len(h) {
-			sep[i] = strings.Repeat("-", widths[i])
+		widths[i] = runeLen(h)
+	}
+	// 除 First Question（最后一列）外，各列宽度取内容最大值，保证单行完整显示
+	maxFirst := 0
+	rows := make([][]string, len(views))
+	for i, v := range views {
+		row := []string{v.Agent, v.StartedAt, v.EndedAt, v.Duration, v.Tokens,
+			shortDir(v.WorkingDirectory), oneLine(v.FirstQuestion)}
+		rows[i] = row
+		for j := 0; j < n-1; j++ {
+			if w := runeLen(row[j]); w > widths[j] {
+				widths[j] = w
+			}
 		}
+		if w := runeLen(row[n-1]); w > maxFirst {
+			maxFirst = w
+		}
+	}
+	// First Question 允许两行：宽度取内容与固定上限的较小值（上限 80）
+	firstW := maxFirst
+	if firstW > 80 {
+		firstW = 80
+	}
+	widths[n-1] = firstW
+
+	sep := make([]string, n)
+	for i, h := range headers {
+		sep[i] = strings.Repeat("-", max(widths[i], len(h)))
 	}
 	fmt.Fprintf(w, "%s\n", align(headers, widths))
 	fmt.Fprintf(w, "%s\n", align(sep, widths))
-	for _, v := range views {
-		row := []string{v.Agent, v.StartedAt, v.EndedAt, v.Duration, v.Tokens,
-			shortDir(v.WorkingDirectory), oneLine(v.FirstQuestion)}
-		fmt.Fprintf(w, "%s\n", align(row, widths))
+	for _, row := range rows {
+		lines := wrapFirst(row[n-1], firstW)
+		for li, line := range lines {
+			cur := make([]string, n)
+			if li == 0 {
+				copy(cur, row[:n-1])
+			}
+			cur[n-1] = line
+			fmt.Fprintf(w, "%s\n", align(cur, widths))
+		}
 	}
 	return nil
+}
+
+// wrapFirst 将单行文本按宽度换行，最多两行；超出部分省略号截断。
+func wrapFirst(s string, w int) []string {
+	if s == "" {
+		return []string{""}
+	}
+	if runeLen(s) <= w {
+		return []string{s}
+	}
+	first := truncateAt(s, w-1) + "…"
+	rest := restAfter(s, w-1)
+	if rest == "" {
+		return []string{first}
+	}
+	second := truncateAt(rest, w-1) + "…"
+	return []string{first, second}
+}
+
+// restAfter 返回按宽度截断 w 后剩余的字符串。
+func restAfter(s string, w int) string {
+	runes := []rune(s)
+	width := 0
+	for i, r := range runes {
+		rw := runewidth.RuneWidth(r)
+		if width+rw > w {
+			return string(runes[i:])
+		}
+		width += rw
+	}
+	return ""
+}
+
+// truncateAt 截断字符串到指定显示宽度（不含省略号）。
+func truncateAt(s string, w int) string {
+	if runeLen(s) <= w {
+		return s
+	}
+	var out []rune
+	width := 0
+	for _, rn := range s {
+		if width+runewidth.RuneWidth(rn) > w {
+			break
+		}
+		out = append(out, rn)
+		width += runewidth.RuneWidth(rn)
+	}
+	return string(out)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func align(cells []string, widths []int) string {

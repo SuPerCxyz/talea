@@ -95,7 +95,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		items = append(items, sessionListItem{
 			Agent:          string(s.AgentID),
 			SessionID:      s.SessionID,
-			FirstQuestion:  truncateRunes(s.FirstQuestion, 120),
+			FirstQuestion:  truncateRunes(s.FirstQuestion, 160),
 			StartedAt:      fmtTime(s.StartedAt),
 			LastActivityAt: fmtTime(s.LastActivityAt),
 			Duration:       durText(s.Duration),
@@ -243,8 +243,10 @@ const pageHTML = `<!DOCTYPE html>
 <title>Talea · 会话</title>
 <style>
 body { font-family: monospace; margin: 2rem; background:#111; color:#ddd; }
-table { border-collapse: collapse; width: 100%; }
+table { border-collapse: collapse; width: 100%; table-layout: auto; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #333; }
+td.nowrap { white-space: nowrap; }
+td.q { white-space: normal; max-width: 480px; }
 a { color: #7c9; text-decoration: none; }
 input { background:#222; color:#ddd; border:1px solid #555; padding:6px; }
 h1 { color:#e8e; }
@@ -268,8 +270,8 @@ async function load() {
   let html = '<table><tr><th>Agent</th><th>开始</th><th>时长</th><th>Token</th><th>目录</th><th>首次提问</th></tr>';
   for (const it of items) {
     const href = '/api/session?id=' + encodeURIComponent(it.session_id);
-    html += '<tr><td>' + it.agent + '</td><td>' + it.started_at + '</td><td>' + it.duration +
-      '</td><td>' + it.tokens + '</td><td>' + it.working_directory + '</td><td><a href="' + href + '">' + it.first_question + '</a></td></tr>';
+    html += '<tr><td class="nowrap">' + it.agent + '</td><td class="nowrap">' + it.started_at + '</td><td class="nowrap">' + it.duration +
+      '</td><td class="nowrap">' + it.tokens + '</td><td class="nowrap">' + it.working_directory + '</td><td class="q"><a href="' + href + '">' + it.first_question + '</a></td></tr>';
   }
   html += '</table>';
   document.getElementById('sessions').innerHTML = html;
