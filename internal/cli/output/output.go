@@ -282,7 +282,9 @@ func writeTable(w io.Writer, views []SessionView) error {
 	return nil
 }
 
-// wrapFirst 将单行文本按宽度换行，最多两行；超出部分省略号截断。
+// wrapFirst 将单行文本按宽度换行，最多两行。
+// 第一行占满宽度且不加省略号（内容续到第二行）；
+// 仅当第二行仍有剩余时才在末尾加省略号。
 func wrapFirst(s string, w int) []string {
 	if s == "" {
 		return []string{""}
@@ -290,12 +292,15 @@ func wrapFirst(s string, w int) []string {
 	if runeLen(s) <= w {
 		return []string{s}
 	}
-	first := truncateAt(s, w-1) + "…"
-	rest := restAfter(s, w-1)
+	first := truncateAt(s, w)
+	rest := restAfter(s, w)
 	if rest == "" {
 		return []string{first}
 	}
-	second := truncateAt(rest, w-1) + "…"
+	second := rest
+	if runeLen(rest) > w {
+		second = truncateAt(rest, w-1) + "…"
+	}
 	return []string{first, second}
 }
 

@@ -85,7 +85,24 @@ func TestWrapFirst(t *testing.T) {
 					t.Errorf("行宽度 %d 超过列宽 %d: %q", runeLen(line), c.w, line)
 				}
 			}
+			if len(got) > 1 && strings.Contains(got[0], "…") {
+				t.Errorf("第一行不应有省略号: %q", got[0])
+			}
 		})
+	}
+}
+
+func TestWrapFirstEllipsisOnLastLine(t *testing.T) {
+	long := strings.Repeat("这是一个非常长的问题用于验证最后一行超出时省略号只在末尾出现 ", 5)
+	got := wrapFirst(long, 20)
+	if len(got) != 2 {
+		t.Fatalf("应两行，实际 %d 行: %v", len(got), got)
+	}
+	if strings.Contains(got[0], "…") {
+		t.Errorf("第一行不应有省略号: %q", got[0])
+	}
+	if !strings.Contains(got[1], "…") {
+		t.Errorf("第二行超宽应有省略号: %q", got[1])
 	}
 }
 
