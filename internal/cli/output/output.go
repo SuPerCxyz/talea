@@ -163,7 +163,7 @@ func fmtTime(t *time.Time) string {
 	if t == nil {
 		return ""
 	}
-	return t.Format("2006-01-02 15:04")
+	return t.Format("01-02 15:04")
 }
 
 // Write 输出会话列表。

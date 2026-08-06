@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -72,7 +73,14 @@ func newListCmd() *cobra.Command {
 			if sortFlag != "" {
 				a.Config.General.DefaultSort = sortFlag
 			}
-			a.SortSessions(sessions)
+			if a.Config.General.DefaultSort == "" || a.Config.General.DefaultSort == "last_activity" {
+				// 默认按会话结束时间降序（与 talea go 一致）
+				sort.SliceStable(sessions, func(i, j int) bool {
+					return endTs(sessions[i]) > endTs(sessions[j])
+				})
+			} else {
+				a.SortSessions(sessions)
+			}
 			if !includeSubagents {
 				filtered := sessions[:0]
 				for _, s := range sessions {
