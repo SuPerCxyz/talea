@@ -18,6 +18,7 @@ import (
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
 	"github.com/talea/talea/internal/cli/output"
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/resume"
@@ -80,7 +81,7 @@ func resumeSession(ctx context.Context, a *app.App, s *model.Session, cwd string
 		return err
 	}
 	if !plan.DirExists {
-		return fmt.Errorf("原工作目录不存在：%s\n可以执行：talea go %s --cwd <新目录>", plan.TargetDir, s.SessionID)
+		return fmt.Errorf(i18n.Tr("original working directory missing: %s\ntry: talea go %s --cwd <new dir>", "原工作目录不存在：%s\n可以执行：talea go %s --cwd <新目录>"), plan.TargetDir, s.SessionID)
 	}
 	ad, ok := a.Registry.Get(s.AgentID)
 	if !ok {
@@ -127,14 +128,15 @@ type keyMap struct {
 	Enter  key.Binding
 	Detail key.Binding
 	Back   key.Binding
+	Turns  key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Detail, k.Open, k.Back, k.Quit}
+	return []key.Binding{k.Enter, k.Detail, k.Open, k.Back, k.Turns, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Enter, k.Detail, k.Open, k.Back, k.Quit}}
+	return [][]key.Binding{{k.Enter, k.Detail, k.Open, k.Back, k.Turns, k.Quit}}
 }
 
 type item struct {
@@ -157,11 +159,12 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *ind
 	l.SetFilteringEnabled(true)
 
 	km := keyMap{
-		Open:   key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "恢复会话")),
-		Quit:   key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "退出")),
-		Enter:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "进入会话")),
-		Detail: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "详情")),
-		Back:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "返回")),
+		Open:   key.NewBinding(key.WithKeys("o"), key.WithHelp("o", i18n.Tr("resume session", "恢复会话"))),
+		Quit:   key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", i18n.Tr("quit", "退出"))),
+		Enter:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", i18n.Tr("open session", "进入会话"))),
+		Detail: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", i18n.Tr("details", "详情"))),
+		Back:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", i18n.Tr("back", "返回"))),
+		Turns:  key.NewBinding(key.WithKeys("t"), key.WithHelp("t", i18n.Tr("user turns", "用户轮次"))),
 	}
 	return &mainModel{
 		ctx:      ctx,
@@ -205,7 +208,7 @@ func sessionTitle(s *model.Session) string {
 	}
 	q := firstLine(s.FirstQuestion)
 	if q == "" {
-		q = "未识别到有效用户提问"
+		q = i18n.Tr("No valid user question detected", "未识别到有效用户提问")
 	}
 	// 固定 agent 列（8 宽左对齐）与时间列（11 宽），保证各行对齐
 	return fmt.Sprintf("[%-8s] %s  %s", agent, timeStr, q)
@@ -219,25 +222,25 @@ func sessionDesc(s *model.Session) string {
 	}
 	var segs []seg
 	if s.StartedAt != nil {
-		segs = append(segs, seg{"开始", s.StartedAt.Format("01-02 15:04"), 11})
+		segs = append(segs, seg{i18n.Tr("Start", "开始"), s.StartedAt.Format("01-02 15:04"), 11})
 	}
 	if s.EndedAt != nil {
-		segs = append(segs, seg{"结束", s.EndedAt.Format("01-02 15:04"), 11})
+		segs = append(segs, seg{i18n.Tr("End", "结束"), s.EndedAt.Format("01-02 15:04"), 11})
 	}
 	if s.Duration != nil {
-		segs = append(segs, seg{"时长", humanDur(*s.Duration), 7})
+		segs = append(segs, seg{i18n.Tr("Dur", "时长"), humanDur(*s.Duration), 7})
 	}
 	if s.TokenUsage != nil && s.TokenUsage.TotalTokens != nil {
-		segs = append(segs, seg{"Token", humanNum(*s.TokenUsage.TotalTokens), 8})
+		segs = append(segs, seg{i18n.Tr("Token", "Token"), humanNum(*s.TokenUsage.TotalTokens), 8})
 	}
 	if s.WorkingDirectory != "" {
-		segs = append(segs, seg{"目录", shortHome(s.WorkingDirectory), 0})
+		segs = append(segs, seg{i18n.Tr("Path", "目录"), shortHome(s.WorkingDirectory), 0})
 	}
 	if s.GitBranch != "" {
-		segs = append(segs, seg{"分支", s.GitBranch, 0})
+		segs = append(segs, seg{i18n.Tr("Branch", "分支"), s.GitBranch, 0})
 	}
 	if s.Activity == model.ActivityActive {
-		segs = append(segs, seg{"状态", "进行中", 0})
+		segs = append(segs, seg{i18n.Tr("Status", "状态"), i18n.Tr("Active", "进行中"), 0})
 	}
 	if len(segs) == 0 {
 		return s.SessionID
@@ -378,6 +381,11 @@ func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			return m, m.doResume(m.detail.sess)
 		}
+	case key.Matches(msg, m.keys.Turns):
+		if m.detail != nil {
+			m.detail.turnsVisible = !m.detail.turnsVisible
+		}
+		return m, nil
 	}
 	var cmd tea.Cmd
 	m.detail.view, cmd = m.detail.view.Update(msg)
