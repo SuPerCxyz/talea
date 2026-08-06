@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-runewidth"
+
 	"github.com/talea/talea/internal/model"
 )
 
@@ -252,14 +254,26 @@ func pad(s string, w int) string {
 	return s + strings.Repeat(" ", w-runeLen(s))
 }
 
-func runeLen(s string) int { return len([]rune(s)) }
+func runeLen(s string) int {
+	return runewidth.StringWidth(s)
+}
 
 func truncate(s string, w int) string {
 	r := []rune(s)
-	if len(r) <= w {
+	if runewidth.StringWidth(s) <= w {
 		return s
 	}
-	return string(r[:w-1]) + "…"
+	// 按显示宽度截断，保留 w-1 列 + 省略号
+	var out []rune
+	width := 0
+	for _, rn := range r {
+		if width+runewidth.RuneWidth(rn) > w-1 {
+			break
+		}
+		out = append(out, rn)
+		width += runewidth.RuneWidth(rn)
+	}
+	return string(out) + "…"
 }
 
 func shortDir(d string) string {

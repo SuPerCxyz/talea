@@ -383,6 +383,10 @@ func (d *detailModel) renderDetail() string {
 		sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Git Remote："), valueStyle.Render(s.GitRemote)))
 	}
 
+	if s.SourcePath != "" {
+		sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("源记录："), valueStyle.Render(s.SourcePath)))
+	}
+
 	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("消息数量："), valueStyle.Render(fmt.Sprint(s.MessageCount))))
 	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("用户消息："), valueStyle.Render(fmt.Sprint(s.UserMessageCount))))
 	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("工具调用："), valueStyle.Render(fmt.Sprint(s.ToolCallCount))))
