@@ -45,10 +45,7 @@ func newListCmd() *cobra.Command {
 			if err := db.Migrate(ctx); err != nil {
 				return err
 			}
-			if err := search.Ensure(ctx, db); err != nil {
-				return err
-			}
-			if err := search.Populate(ctx, db); err != nil {
+			if err := autoIndex(ctx, a, db); err != nil {
 				return err
 			}
 
@@ -146,10 +143,7 @@ func newSearchCmd() *cobra.Command {
 			if err := db.Migrate(ctx); err != nil {
 				return err
 			}
-			if err := search.Ensure(ctx, db); err != nil {
-				return err
-			}
-			if err := search.Populate(ctx, db); err != nil {
+			if err := autoIndex(ctx, a, db); err != nil {
 				return err
 			}
 

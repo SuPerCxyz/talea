@@ -42,7 +42,14 @@ func Run(ctx context.Context) error {
 	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
+	// 启动前增量索引，保证新会话可见
+	if _, err := (&index.Indexer{App: a, DB: db}).Run(ctx); err != nil {
+		return err
+	}
 	if err := search.Ensure(ctx, db); err != nil {
+		return err
+	}
+	if err := search.Populate(ctx, db); err != nil {
 		return err
 	}
 	results, err := search.List(ctx, db, search.Query{Limit: 500})

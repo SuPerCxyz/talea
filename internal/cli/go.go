@@ -90,7 +90,7 @@ func goSelect(ctx context.Context, a *app.App) error {
 	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
-	if err := search.Ensure(ctx, db); err != nil {
+	if err := autoIndex(ctx, a, db); err != nil {
 		return err
 	}
 	results, err := search.List(ctx, db, search.Query{Limit: 200})

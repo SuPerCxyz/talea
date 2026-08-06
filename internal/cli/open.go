@@ -220,7 +220,7 @@ func findSession(ctx context.Context, a *app.App, id, agent string) (*model.Sess
 	if err := db.Migrate(ctx); err != nil {
 		return nil, err
 	}
-	if err := search.Ensure(ctx, db); err != nil {
+	if err := autoIndex(ctx, a, db); err != nil {
 		return nil, err
 	}
 	results, err := search.Search(ctx, db, search.Query{Term: id, Agent: agent, Limit: 50})
@@ -262,4 +262,16 @@ func firstLine(s string) string {
 func dirExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
+}
+
+// autoIndex 在读取前执行一次增量索引并同步 FTS，保证新会话立即可见。
+// db 已由调用方打开并 Migrate。
+func autoIndex(ctx context.Context, a *app.App, db *index.DB) error {
+	if _, err := (&index.Indexer{App: a, DB: db}).Run(ctx); err != nil {
+		return err
+	}
+	if err := search.Ensure(ctx, db); err != nil {
+		return err
+	}
+	return search.Populate(ctx, db)
 }
