@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Talea logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e3d8fb"/>
+      <stop offset="0.25" stop-color="#b8a3f3"/>
+      <stop offset="0.5" stop-color="#8d5ef2"/>
+      <stop offset="0.75" stop-color="#5f5ae8"/>
+      <stop offset="1" stop-color="#3b4bd4"/>
+    </linearGradient>
+    <linearGradient id="fg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f6f2ff"/>
+      <stop offset="1" stop-color="#93c5fd"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <g fill="none" stroke="url(#fg)" stroke-width="79" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M120 196 H 320"/>
+    <path d="M320 196 L 398 130 M320 196 L 398 262"/>
+    <path d="M392 316 H 192"/>
+    <path d="M192 316 L 114 250 M192 316 L 114 382"/>
+  </g>
+</svg>

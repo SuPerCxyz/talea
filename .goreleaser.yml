@@ -26,7 +26,9 @@ archives:
   - formats: [tar.gz]
     files:
       - README.md
+      - README.zh-CN.md
       - LICENSE
+      - assets/talea-logo.png
 
 changelog:
   sort: asc

@@ -1,238 +1,236 @@
+<div align="center">
+
+<img src="assets/talea-logo.png" alt="Talea logo" width="140"/>
+
 # Talea
 
-Trace the session. Resume the work.
+**Trace the session. Resume the work.**
 
-Talea is a local-first Linux session index, token timeline analyzer,
-and resume launcher for AI coding agents.
+Local-first session index, token timeline analyzer and resume launcher for AI coding agents.
 
-## 这是什么
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-Talea 统一索引本机多个 AI Coding Agent 的历史会话，让你不用记住用的是哪个
-Agent、会话 ID、工作目录、开始时间或恢复命令，一条 `talea` 命令即可找到并
-恢复之前的工作。
+[![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![License: MIT](https://img.shields.io/github/license/SuPerCxyz/talea)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/SuPerCxyz/talea)](https://github.com/SuPerCxyz/talea/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/SuPerCxyz/talea/ci.yml?branch=master)](https://github.com/SuPerCxyz/talea/actions)
+[![Platform](https://img.shields.io/badge/platform-linux--amd64%20%7C%20linux--arm64-8892b0)](https://github.com/SuPerCxyz/talea/releases)
 
-## 名称含义
+</div>
 
-音乐术语 *talea*（等节奏中反复出现的节奏模式）：每个 AI Agent 会话是一段
-工作乐章，每条消息、工具调用、模型请求是时间线上的节拍，Token 消耗反映会话
-上下文的密度变化，会话恢复表示回到之前的工作位置继续推进。
+---
 
-## 解决的问题
+Talea indexes the session history of every AI coding agent on your machine so you can
+find, inspect and **resume** past work without remembering which agent you used, the
+session ID, the working directory, or the exact resume command. It never touches your
+agents' data — it reads them **read-only** and keeps everything **local**.
 
-- 不同 Agent 的会话记录相互独立，难以统一查找
-- 忘记当时用的是哪个 Agent、会话 ID 或工作目录
-- Agent 自动标题无法表达用户最初的提问
-- 无法跨 Agent 搜索历史对话
-- 难以知道会话消耗了多少 Token、上下文何时膨胀或压缩
-- 原目录移动/重命名后难以恢复
+## Features
 
-## 支持的 Agent
+- 🔎 **Cross-agent full-text search** — SQLite FTS5 with Chinese (trigram) support.
+- ▶️ **One-command resume** — a full or partial session ID is matched automatically;
+  resumes in the agent's own TUI via the native `claude --resume`, `codex resume` or
+  `opencode -s` command.
+- 📊 **Token timeline & cost analysis** — per-request timeline, model summary, context
+  window curve with compaction detection, terminal charts, cost estimates.
+- 🖥️ **Interactive TUI** — session list with an aggregated detail page, context curve,
+  token charts and a `t` key to expand user turns.
+- 🌐 **i18n** — English by default, Chinese automatically when your locale starts with `zh`.
+- 🔌 **Extensible** — add agents via `internal/adapters/<name>` packages or ship an
+  external `talea-adapter-<name>` executable (JSON Lines over stdio, any language).
+- 🔒 **Private & safe** — agents' data opened read-only, index file permission `0600`,
+  secrets redacted in previews, no telemetry, no network access.
+- 🚀 **Fast** — incremental indexing with offset-resume; 10k sessions re-index in ~0.8s.
 
-| Agent | 数据目录 | 恢复命令 |
-|-------|---------|---------|
-| Claude Code | `~/.claude/projects/...` | `claude --resume <id>` |
-| Codex CLI | `~/.codex/sessions/...` | `codex resume <id>` |
-| OpenCode | `~/.local/share/opencode/opencode.db` | `opencode -s <id>` |
+## Supported Agents
 
-支持 linux/amd64 与 linux/arm64，构建为单二进制，无 Python/Node/浏览器/外部
-数据库依赖。
+| Agent | Data source | Resume command |
+|-------|------------|----------------|
+| Claude Code | `~/.claude/projects/<enc-cwd>/<sessionId>.jsonl` | `claude --resume <id>` |
+| Codex CLI | `~/.codex/sessions/<Y>/<M>/<D>/rollout-*.jsonl` | `codex resume <id>` |
+| OpenCode | `~/.local/share/opencode/opencode.db` (SQLite) | `opencode -s <id>` |
+| Any | external `talea-adapter-<name>` plugin | — |
 
-## 安装
+## Installation
 
-```text
-# 从源码构建
+### Prebuilt binaries
+
+Download the latest `talea_<version>_linux_<arch>.tar.gz` and its checksums from the
+[Releases page](https://github.com/SuPerCxyz/talea/releases) (amd64 and arm64), then:
+
+```sh
+tar xzf talea_*.tar.gz
+sudo install -m 0755 talea /usr/local/bin/talea
+talea version
+```
+
+### Build from source
+
+Requires Go 1.25+ (no cgo, no external dependencies):
+
+```sh
+git clone https://github.com/SuPerCxyz/talea.git
+cd talea
 make build
 sudo install -m 0755 bin/talea /usr/local/bin/talea
 ```
 
-## 快速开始
+## Quick Start
 
-```text
-# 建立索引
+```sh
+# Build the index of all detected agents
 talea index
 
-# 打开 TUI
+# Open the TUI
 talea
 
-# 跨 Agent 搜索
+# Search across agents
 talea search "multipath"
 
-# 列出最近会话
+# List recent sessions
 talea list
 
-# 恢复指定会话（干跑查看参数；ID 支持前缀自动匹配）
+# Resume a session by full or partial ID (dry run to preview the command)
 talea go <session-id> --dry-run
-
-# 交互式选择会话并进入
-talea go
-
-# 当前目录最近会话
-talea last
-
-# 环境诊断
-talea doctor
+talea go <session-id>
 ```
 
-## CLI 命令
+## TUI
 
 ```text
-talea                          # TUI 主界面
-talea list                     # 列表（--agent/--cwd/--today/--active/--sort/--limit）
-talea search "关键词"            # 跨 Agent 全文搜索
-talea go <session-id>           # 进入会话（ID 完整或前缀自动匹配；--dry-run/--cwd）；无 ID 时交互式选择
-talea last                      # 当前目录最近会话
-talea index                     # 增量索引（--rebuild/--metadata-only）
-talea usage <session-id>        # Token 汇总（--details/--include-subagents/--metrics）
-talea timeline <session-id>     # Token 时间线（--group-by/--bucket/--around-peak/--by-model/--context/--insights）
-talea doctor                    # 环境诊断（--json/--agent）
-talea run <agent>               # 包装启动 Agent（记录真实进程时间）
-talea watch                     # 监听 Agent 数据目录，变化时增量索引
-talea web                       # 本地只读 Web 视图（仅 localhost）
-talea tag <session-id> [标签...] # 标签 / 收藏 / 备注（tag list|favorite|note）
-talea preview <session-id>      # 对话预览（--limit/--system/--tail）
-talea export <文件>             # 导出全部会话（含标签，跨设备迁移）
-talea import <文件>             # 导入会话（已存在跳过）
-talea config path|init|validate
-talea version
+talea          # session list (most recent 500)
 ```
 
-输出格式支持 `--format table|json|jsonl|csv|markdown`。
+- `↑` / `↓` select, `Enter` resume, `d` open details, `o` resume from details,
+  `/` filter, `q` quit.
+- The detail page aggregates: session info (two-column layout), first question,
+  user turns (`t` to expand/collapse), a **context window curve** (area chart with a
+  token y-axis and time axis), per-model summary, token chart, token summary and
+  sub-agent sessions.
+- New sessions appear automatically — the TUI re-indexes in the background.
 
-## TUI 界面
+## CLI Reference
 
-```text
-talea          # 会话列表（最近 500 条）
-```
+| Command | Description |
+|---------|-------------|
+| `talea` | Open the TUI |
+| `talea list` | List sessions (`--agent/--cwd/--project/--branch/--today/--active/--sort/--limit/--format`) |
+| `talea search <keyword>` | Full-text search across agents (`--agent/--cwd/--since/--format`) |
+| `talea go [session-id]` | Resume a session by full/prefix ID, or pick interactively (`--cwd/--dry-run`) |
+| `talea last` | Recent session in the current directory |
+| `talea index` | Incremental index (`--rebuild/--metadata-only`) |
+| `talea usage <id>` | Token usage summary (`--details/--include-subagents/--metrics`) |
+| `talea timeline <id>` | Token timeline (`--group-by/--bucket/--around-peak/--by-model/--context/--insights/--chart`) |
+| `talea preview <id>` | Conversation preview (`--limit/--system/--tail`) |
+| `talea doctor` | Environment diagnostics (`--json/--agent`) |
+| `talea run <agent>` | Wrap-launch an agent and record real process times |
+| `talea watch` | Watch agent data dirs and index on change (`--interval`) |
+| `talea web` | Local read-only web view on localhost (`--port`) |
+| `talea tag` | Tags / favorite / note (`tag list|favorite|note`) |
+| `talea export` / `talea import` | Offline multi-device transfer (JSON) |
+| `talea config` | `config path|init|validate` |
 
-- `↑/↓` 选择，`Enter` 直接恢复会话，`d` 进入详情，`o` 恢复当前会话，
-  `/` 过滤，`q` 退出。
-- 详情页（`d`）聚合展示：会话信息（双列布局）、第一次提问、用户轮次（`t` 键
-  展开/收起）、上下文窗口曲线（面积图，带 y 轴 Token 刻度与时间轴）、按模型
-  汇总、Token 图表、Token 汇总、子 Agent 会话。
-- 列表行 agent 名固定 10 宽对齐，desc 显示开始/结束/时长/Token/路径/分支。
-- 后台自动增量索引，列表随新会话出现自动刷新，无需手动 `talea index`。
+Output formats: `--format table|json|jsonl|csv|markdown`.
 
-## 界面语言
+## Token Analysis
 
-默认英文；当终端 `LANG` / `LC_ALL` / `LC_MESSAGES` / `LANGUAGE` 以 `zh`
-开头时自动切换中文，覆盖 TUI、CLI 输出、命令帮助与错误消息。
-
-## Token 时间线
-
-```text
-# 请求级明细（时间/模型/输入/输出/缓存/总计）
+```sh
+# Request-level timeline (dates included)
 talea timeline <session-id>
 
-# 按用户轮次聚合
+# Aggregate by user turn
 talea timeline <session-id> --group-by turn
 
-# 5 分钟时间桶
-talea timeline <session-id> --bucket 5m
+# 5-minute buckets, around peak
+talea timeline <session-id> --bucket 5m --around-peak
 
-# 峰值附近
-talea timeline <session-id> --bucket 15m --around-peak
-
-# 按模型汇总
+# Model summary
 talea timeline <session-id> --by-model
 
-# 上下文窗口曲线与压缩检测
+# Context window curve + compaction detection
 talea timeline <session-id> --context
 
-# 本地规则 Token 消耗洞察
+# Local-rule insights
 talea timeline <session-id> --insights
 
-# 导出 CSV / Markdown
-talea timeline <session-id> --format csv --output timeline.csv
+# Cost estimate (opt-in via config)
+talea usage <session-id>
 ```
 
-## Token 洞察
+Exact / estimated / unknown token values are kept strictly distinct — missing data shows
+`unknown`, never `0`. Timeline events are deduplicated by `source_identity`; sub-agent
+tokens are stored separately and never merged into the parent session by default.
 
-基于本地规则生成可追溯的消耗分析：P95 高消耗请求、上下文超限、
-上下文压缩、短时快速增长、缓存缺失。所有结论可定位到具体事件。
+## i18n
 
-## 费用估算
+English is the default. When `LANG` / `LC_ALL` / `LC_MESSAGES` / `LANGUAGE` starts with
+`zh`, Talea switches to Chinese across the TUI, CLI output, command help and error
+messages.
 
-默认关闭。在 `config.toml` 启用并配置价格表后，`talea usage` 显示估算费用：
+## Configuration
+
+`talea config init` creates `~/.config/talea/config.toml`. Highlights:
 
 ```toml
+[general]
+default_sort = "last_activity"
+
 [usage]
-estimate_cost = true
+estimate_cost = false        # enable cost estimation
 
 [usage.pricing.custom-model]
 currency = "USD"
 input_per_million = 3.0
 output_per_million = 15.0
 cache_read_per_million = 0.3
+
+[path_mapping]               # remap moved/renamed directories
+"/old/project" = "/new/project"
 ```
 
-估算使用整数微货币单位，价格带快照时间，不替代供应商账单。
+## Data & Privacy
 
-## 父子会话
+- Agents' original session files and databases are opened **read-only** and never
+  modified, renamed or deleted.
+- Index: `${XDG_DATA_HOME:-~/.local/share}/talea/index.db`, file permission `0600`,
+  directory `0700`.
+- No uploads, no telemetry, no online update checks. All network features are explicitly
+  opt-in (e.g. `talea web` binds to localhost only).
 
-子 Agent Token 独立保存，默认不合并。`talea index` 自动解析父子关系并
-聚合到 `direct_child_tokens` / `descendant_tokens`。`talea usage` 显示三者。
+## Extending Talea
 
-## 首次提问
+- **In-tree**: add an `internal/adapters/<name>/` package and register it in
+  `internal/adapters/registry.go`. No `switch agent` in core code.
+- **Out-of-tree**: drop an executable implementing the `talea-adapter-<name>` protocol
+  (JSON Lines over stdio, methods `info/detect/discover/parse/messages/usage/timeline`)
+  into your `PATH`. See `docs/adapters/`.
 
-会话列表最重要的识别字段是「第一次提问」：会话中第一条真实用户消息，过滤
-系统提醒、AGENTS.md 注入块、环境上下文、工具输出等内部内容。无法识别时显示
-「未识别到有效用户提问」。
+## Roadmap
 
-## 开始与结束时间
+See [`docs/plan/03-enhancement-roadmap.md`](docs/plan/03-enhancement-roadmap.md) for the
+planned `talea stats` global reporting, session forking, web dashboard enhancements and
+more.
 
-- 开始时间优先级：会话元数据创建时间 → 第一条真实用户消息 → 第一条有效事件
-  → 文件 mtime。
-- 结束时间优先级：真实进程退出时间 → Agent 明确保存的结束时间 → 最后一条
-  有效事件 → 文件 mtime。用最后活动代替结束时间时详情页标注「结束依据」。
+## FAQ
 
-## Token 汇总
+**Is my data sent anywhere?** No. Everything runs locally and read-only.
 
-精确值/估算值/未知值严格区分：缺失显示「未知」而非 0。禁止重复累计 Token，
-usage 事件通过 `source_identity` 去重。子 Agent Token 独立保存，默认不合并
-到主会话。
+**Do I need Python/Node/a browser?** No — a single Go binary, zero external runtime deps.
 
-## 恢复原理
+**Can it resume sessions from a moved directory?** Yes. Use `talea go <id> --cwd <dir>`
+or configure `[path_mapping]`; `talea` prompts for a new directory when the original is gone.
 
-选择会话后：检查 Agent 与目录 → 应用路径映射 → 构造原生恢复命令（参数数组，
-无 shell 拼接）→ 切到原目录 → `syscall.Exec` 替换进程。
+## Development
 
-## 数据目录
-
-```text
-索引：${XDG_DATA_HOME:-~/.local/share}/talea/index.db （权限 0600）
-配置：${XDG_CONFIG_HOME:-~/.config}/talea/config.toml
-缓存：${XDG_CACHE_HOME:-~/.cache}/talea/
+```sh
+make build    # build bin/talea
+make test     # go test ./...
+make lint     # golangci-lint
+make vet      # go vet ./...
 ```
 
-## 隐私
+Contributions are welcome — open an issue or a pull request.
 
-不上传数据、不默认联网、不启用遥测、不收集用户信息、不检查在线更新。索引
-文件权限 0600，敏感信息默认遮罩，日志不记录完整消息与环境变量。
+## License
 
-## 新增 Agent
-
-新增一个 `internal/adapters/<name>/` 包并在 `registry.go` 注册即可，核心代码
-无 `switch agent` 硬编码。详见 `docs/adapters/adding-an-agent.md`。
-
-## 外部适配器（插件）
-
-不修改源码也能扩展新 Agent：把实现 `talea-adapter-<name>` 协议的可执行文件
-放入 PATH，Talea 自动发现。协议为 JSON Lines over stdio，支持 7 个方法
-（info/detect/discover/parse/messages/usage/timeline），任何语言皆可实现。
-详见 `docs/adapters/external-plugin-proposal.md`。
-
-## 故障排查
-
-```text
-talea doctor        # 检查环境与索引状态
-talea config validate
-```
-
-## 开发与测试
-
-```text
-make build && make test && make lint
-go test ./...
-```
-
-详细架构见 `docs/architecture.md`，Token 模型见 `docs/token-model.md`。
+[MIT](LICENSE) © 2026 superc
