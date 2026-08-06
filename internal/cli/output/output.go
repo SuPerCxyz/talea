@@ -51,7 +51,7 @@ type SessionView struct {
 // ViewOf 构造会话视图。
 func ViewOf(s *model.Session) SessionView {
 	return SessionView{
-		Agent:            string(s.AgentID),
+		Agent:            DisplayAgent(s.AgentID),
 		AgentInstance:    s.AgentInstanceID,
 		SessionID:        s.SessionID,
 		FirstQuestion:    s.FirstQuestion,
@@ -172,6 +172,20 @@ func fmtTime(t *time.Time) string {
 // FormatSessionTime 输出会话时间的短格式（与表格一致）。
 func FormatSessionTime(t *time.Time) string {
 	return fmtTime(t)
+}
+
+// DisplayAgent 将 Agent ID 转为统一显示名（claude/codex/opencode）。
+func DisplayAgent(id model.AgentID) string {
+	switch id {
+	case model.AgentClaudeCode:
+		return "claude"
+	case model.AgentCodexCLI:
+		return "codex"
+	case model.AgentOpenCode:
+		return "opencode"
+	default:
+		return string(id)
+	}
 }
 
 // Column 定义表格列：标题、最大宽度（0 不限制）、截断策略。

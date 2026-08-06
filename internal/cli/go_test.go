@@ -31,7 +31,7 @@ func TestGoRow(t *testing.T) {
 				HasTokenUsage:    true,
 				TokenUsage:       &model.TokenUsage{TotalTokens: int64p(1400000)},
 			},
-			want: []string{"claude-code", "abc123", "08-05 16:41", "08-05 17:00", "19m 0s", "1.40M", "~/proj", "修复登录 bug"},
+			want: []string{"claude", "abc123", "08-05 16:41", "08-05 17:00", "19m 0s", "1.40M", "~/proj", "修复登录 bug"},
 		},
 		{
 			name: "empty optional",

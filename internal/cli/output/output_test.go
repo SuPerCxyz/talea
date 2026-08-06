@@ -102,9 +102,9 @@ func TestWriteTableDynamicWidth(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	// claude-code 应完整显示（不截断）
-	if !strings.Contains(out, "claude-code") {
-		t.Errorf("Agent 列应完整显示 claude-code，实际: %q", out)
+	// claude 应完整显示（不截断）
+	if !strings.Contains(out, "claude") {
+		t.Errorf("Agent 列应完整显示 claude，实际: %q", out)
 	}
 	// First Question 应单行（数据行数 = 表头 + 分隔线 + 1 数据行）
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")

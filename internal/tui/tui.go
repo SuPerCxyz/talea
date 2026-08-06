@@ -16,6 +16,7 @@ import (
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/cli/output"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/resume"
@@ -195,58 +196,65 @@ func sessionTitle(s *model.Session) string {
 }
 
 func sessionDesc(s *model.Session) string {
-	var parts []string
+	type seg struct {
+		prefix string
+		value  string
+		alignR bool // 值右对齐固定宽（时长/Token），否则左对齐不限宽
+	}
+	var segs []seg
 	if s.Duration != nil {
-		parts = append(parts, "时长 "+humanDur(*s.Duration))
+		segs = append(segs, seg{"时长", humanDur(*s.Duration), true})
 	}
 	if s.TokenUsage != nil && s.TokenUsage.TotalTokens != nil {
-		parts = append(parts, fmt.Sprintf("Token %s", humanNum(*s.TokenUsage.TotalTokens)))
+		segs = append(segs, seg{"Token", humanNum(*s.TokenUsage.TotalTokens), true})
 	}
 	if s.WorkingDirectory != "" {
-		parts = append(parts, "目录 "+shortHome(s.WorkingDirectory))
+		segs = append(segs, seg{"目录", shortHome(s.WorkingDirectory), false})
 	}
 	if s.GitBranch != "" {
-		parts = append(parts, "分支 "+s.GitBranch)
+		segs = append(segs, seg{"分支", s.GitBranch, false})
 	}
 	if s.Activity == model.ActivityActive {
-		parts = append(parts, "进行中")
+		segs = append(segs, seg{"状态", "进行中", false})
 	}
-	if len(parts) == 0 {
+	if len(segs) == 0 {
 		return s.SessionID
 	}
-	// 每段前缀固定 8 显示宽度（左对齐），时长/Token/目录等值列对齐
+	// 前缀固定 6 显示宽；时长/Token 值右对齐 9 宽保证跨行对齐，
+	// 目录/分支等长文本左对齐不限制
 	var sb strings.Builder
-	for i, p := range parts {
+	for i, g := range segs {
 		if i > 0 {
 			sb.WriteString("  ")
 		}
-		colon := strings.IndexByte(p, ' ')
-		if colon > 0 {
-			prefix := p[:colon+1]
-			sb.WriteString(prefix)
-			pad := 8 - runewidth.StringWidth(prefix)
-			if pad > 0 {
-				sb.WriteString(strings.Repeat(" ", pad))
-			}
-			sb.WriteString(p[colon+1:])
+		sb.WriteString(padDisplay(g.prefix+" ", 6))
+		if g.alignR {
+			sb.WriteString(padLeft(g.value, 9))
 		} else {
-			sb.WriteString(p)
+			sb.WriteString(g.value)
 		}
 	}
 	return sb.String()
 }
 
-func displayAgent(a model.AgentID) string {
-	switch a {
-	case model.AgentClaudeCode:
-		return "Claude"
-	case model.AgentCodexCLI:
-		return "Codex"
-	case model.AgentOpenCode:
-		return "OpenCode"
-	default:
-		return string(a)
+// padDisplay 左对齐填充到指定显示宽度。
+func padDisplay(s string, w int) string {
+	if runewidth.StringWidth(s) >= w {
+		return s
 	}
+	return s + strings.Repeat(" ", w-runewidth.StringWidth(s))
+}
+
+// padLeft 右对齐填充到指定显示宽度。
+func padLeft(s string, w int) string {
+	if runewidth.StringWidth(s) >= w {
+		return s
+	}
+	return strings.Repeat(" ", w-runewidth.StringWidth(s)) + s
+}
+
+func displayAgent(a model.AgentID) string {
+	return output.DisplayAgent(a)
 }
 
 // Init 初始化模型。
