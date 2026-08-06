@@ -15,13 +15,13 @@ Talea 是一个面向 Linux 的本地优先 AI Coding Agent 会话索引、搜�
 7. **命令安全**：所有外部命令通过参数数组执行；禁止拼接 `sh -c`。恢复使用 `syscall.Exec`。
 8. **版本约束**：支持 linux/amd64 与 linux/arm64，构建为单二进制（使用 modernc.org/sqlite，纯 Go 无 cgo）。不得依赖 Python/Node/浏览器/外部数据库/常驻服务。
 
-## 环境事实（实测，2026-08-05）
+## 环境事实（实测，2026-08-06）
 
 | Agent | 版本 | 数据目录 | 恢复命令 |
 |-------|------|---------|---------|
-| Claude Code | 2.1.216 | `~/.claude/projects/<enc-cwd>/<sessionId>.jsonl` | `claude --resume <id>` |
+| Claude Code | 2.1.223 | `~/.claude/projects/<enc-cwd>/<sessionId>.jsonl` | `claude --resume <id>` |
 | Codex CLI | 0.146.0 | `~/.codex/sessions/<Y>/<M>/<D>/rollout-*.jsonl` | `codex resume <id>` |
-| OpenCode | 1.18.13 | `~/.local/share/opencode/opencode.db`（SQLite ~6GB） | `opencode -s <id>` |
+| OpenCode | 1.18.14 | `~/.local/share/opencode/opencode.db`（SQLite ~6GB） | `opencode -s <id>` |
 
 格式细节见 `docs/formats/{claude-code,codex-cli,opencode}.md`。环境变更后（如版本升级）需重新调查并更新文档，禁止凭经验硬编码未确认格式。
 
@@ -45,10 +45,11 @@ internal/
   cli/                     # cobra 命令
   tui/                     # Bubble Tea 界面
   version/
-migrations/                # 幂等 SQL 迁移
 docs/                      # 架构、隐私、token、格式文档
-testdata/{claude,codex,opencode}/   # 脱敏测试夹具
+testdata/{claude,codex}/   # 脱敏测试夹具（opencode 测试动态生成 DB，无静态夹具）
 ```
+
+> 说明：数据库 schema 与幂等迁移内联在 `internal/index/db.go`（`CREATE TABLE IF NOT EXISTS`），无独立 `migrations/` 目录。
 
 ## 分层规则
 

@@ -18,9 +18,9 @@
 
 | Agent | 规格未指定 | 实测版本 | 备注 |
 |-------|-----------|---------|------|
-| Claude Code | — | 2.1.216 | `~/.npm-global/bin/claude` |
+| Claude Code | — | 2.1.223 | `~/.npm-global/bin/claude` |
 | Codex CLI | — | 0.146.0 | `~/.npm-global/bin/codex` |
-| OpenCode | — | 1.18.13 | `~/.npm-global/bin/opencode` |
+| OpenCode | — | 1.18.14 | `~/.npm-global/bin/opencode` |
 
 版本号必须写入 `AdapterInfo.Version`，并在 `docs/formats/*.md` 中记录「已验证版本」。
 
@@ -49,10 +49,11 @@
 
 ## 3. 内部矛盾与需澄清项
 
-### 3.1 `talea open` 的 `--cwd` 语义（规格 §25 vs §30）
+### 3.1 `talea go` 的 `--cwd` 语义（规格 §25 vs §30）
 
 - §25 `talea open --agent claude-code <session-id>`：进入会话原目录。
 - §30 错误示例提示 `talea open 8f463a2e --cwd /home/user/code/cinder`：`--cwd` 覆盖原目录。
+- **命令已合并**：`talea open` 并入 `talea go`（`--cwd`/`--dry-run`；session id 前缀自动匹配，无需指定 agent）。
 
 **决定**：`--cwd` 表示「显式目标目录」，优先级高于会话原目录与路径映射。此为规格自然解读，写入 CLI 文档。
 
@@ -92,7 +93,7 @@ P0 共 30 项。其中 Token 模型（27/28 项）仅要求「数据模型预留
 | 单 Agent 失败不影响其他 | 高 | 适配器隔离 + 错误聚合 |
 | 首次提问准确 | 中 | 需过滤 system/instructions/environment_context 块（Codex 已实测 AGENTS.md 注入） |
 | Token 去重 | 中 | 需 `source_identity` 去重 + delta/cumulative 识别 |
-| 原生恢复 | 高 | `claude --resume <id>` / `codex resume <id>` / `opencode run -s <id>` 均已验证 |
+| 原生恢复 | 高 | `claude --resume <id>` / `codex resume <id>` / `opencode -s <id>` 均已验证 |
 | 权限 0600 | 高 | 索引文件 chmod |
 
 **首次提问风险**：Codex 实测首条 user 消息包含 `AGENTS.md instructions` 与 `<environment_context>` 注入块，必须在提取时剥离，否则首次提问被污染。
@@ -104,7 +105,7 @@ P0 共 30 项。其中 Token 模型（27/28 项）仅要求「数据模型预留
 | `talea doctor` 识别 Agent | 高 | 三 Agent 均已安装 |
 | `talea list` 展示字段 | 高 | 格式实测可提取 |
 | `talea search` 跨 Agent | 高 | FTS5 可实现 |
-| `talea open --dry-run` | 高 | 恢复命令已验证 |
+| `talea go --dry-run` | 高 | 恢复命令已验证（`talea open` 已并入 go） |
 | 中文显示/搜索 | 中 | FTS5 默认 tokenizer 对中文不理想，需验证 `unicode61` 或自定义方案 |
 | 单损坏文件不退出 | 高 | 逐行容错 |
 | 权限 0600 | 高 | 显式 chmod |

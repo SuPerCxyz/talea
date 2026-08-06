@@ -9,9 +9,9 @@ Talea — Trace the session. Resume the work.
 | 项 | 值 |
 |----|-----|
 | Go | 1.26.0 linux/amd64 |
-| Claude Code | 2.1.216，数据 `~/.claude/projects/<enc-cwd>/<id>.jsonl` |
+| Claude Code | 2.1.223，数据 `~/.claude/projects/<enc-cwd>/<id>.jsonl` |
 | Codex CLI | 0.146.0，数据 `~/.codex/sessions/<Y>/<M>/<D>/rollout-*.jsonl` |
-| OpenCode | 1.18.13，数据 `~/.local/share/opencode/opencode.db`（SQLite ~6GB） |
+| OpenCode | 1.18.14，数据 `~/.local/share/opencode/opencode.db`（SQLite ~6GB） |
 | XDG | 全空 → 使用默认路径 |
 | 恢复命令 | `claude --resume <id>` / `codex resume <id>` / `opencode -s <id>` |
 | sqlite3 CLI | 未安装（调查用 Python 只读完成，项目本体零 Python 依赖） |
@@ -44,9 +44,8 @@ talea/
 │   ├── cli/                    # cobra 命令
 │   ├── tui/                    # Bubble Tea 界面
 │   └── version/                # 版本信息
-├── migrations/                 # SQL 迁移文件（幂等）
 ├── docs/                       # 文档（本目录）
-├── testdata/                   # 脱敏测试夹具
+├── testdata/                   # 脱敏测试夹具（opencode 测试动态生成 DB，无静态夹具）
 ├── scripts/
 ├── .github/workflows/
 ├── .golangci.yml
@@ -121,7 +120,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 ### Phase 4：CLI 命令面
 
 - [x] `talea list`（--agent/--cwd/--today/--active/--include-subagents/--sort/--limit/--format）
-- [x] `talea go`（含 --dry-run、--cwd 覆盖、路径映射、目录缺失交互；无 ID 交互式选择）
+- [x] `talea go`（含 --dry-run、--cwd 覆盖、路径映射、目录缺失交互；session id 支持完整或前缀自动匹配；无 ID 交互式选择）
 - [x] `talea usage` / `talea timeline`（P1 前置的 CLI 骨架）
 - [x] `talea last` / `talea config path|init|validate`
 - [x] `talea doctor`（骨架 → Phase 6 完善）
@@ -132,7 +131,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 - [x] `internal/resume`：构造命令（参数数组）、`syscall.Exec`、LookPath
 - [x] 路径映射最长前缀匹配（`[path_mapping]`）
-- [x] 原目录不存在交互：映射/当前目录/仅查看/复制命令/取消
+- [x] 原目录不存在交互（**已简化**：提示新目录或默认 /tmp，非 TTY 直接 /tmp；原「映射/当前目录/仅查看/复制命令/取消」五选项方案不再实现）
 - [x] 命令注入安全测试（恶意 session id / cwd / 引号 / 元字符 / ANSI 注入）
 
 ### Phase 6：Doctor
@@ -144,11 +143,12 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 ### Phase 7：TUI
 
-- [x] 会话列表（列动态隐藏、中文宽度、排序、搜索过滤）
-- [x] 详情页对话预览（p 键，按需加载 + ANSI 清理 + 脱敏）
+- [x] 会话列表（列动态隐藏、中文宽度、排序、搜索过滤、agent 名固定 10 宽对齐）
+- [x] 详情页聚合展示（会话信息双列 / 上下文曲线 Area / 按模型汇总 / Token 图表 / Token 汇总 / 子 Agent；t 键折叠用户轮次）
+- [ ] 详情页对话预览（p 键）—— **已移除**，改为详情页聚合展示；CLI `talea preview` 保留
 - [x] Enter 恢复流程
 - [x] 活动状态、进行中标识
-- [x] Token 时间线页（P1 完整；P0 预留快捷键）
+- [ ] Token 时间线独立页 —— **已移除**，图表并入聚合详情页；CLI `talea timeline` 保留
 
 ### Phase 8：P1 — Token 汇总与时间线（已完成）
 
@@ -179,7 +179,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 ### P1 增强与 P2（已完成）
 
 - [x] 活动状态检测（/proc 进程 + 文件更新时间，`list --active` 生效）
-- [x] 目录缺失交互处理（go 五选项，非 TTY 自动取消）
+- [x] 目录缺失交互处理（**已简化**：提示新目录或默认 /tmp；非 TTY 直接 /tmp）
 - [x] search/list 过滤补全（--project / --branch）
 - [x] doctor 增强（索引格式/Token 完整性/FTS/路径映射冲突）
 - [x] 会话标签 / 收藏 / 备注（`talea tag`）
@@ -231,3 +231,16 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 ## 8. 执行说明
 
 每个阶段完成：运行相关测试 → 汇报新增文件、设计决定、未确认格式、风险。最终交付可编译、可运行、可测试、可发布的完整仓库。
+
+## 9. 迭代变更记录（2026-08-06）
+
+实现后按用户反馈做的调整，与上文 checkbox 状态同步：
+
+- `talea open` 合并入 `talea go`（`--cwd`/`--dry-run`；session id 支持完整或前缀自动匹配，无需 `--agent`）。
+- TUI 详情页由「预览 + 时间线页」重构为**聚合展示**：移除对话预览（p 键）与独立 Token 时间线页；上下文曲线改 `chart.Area`（9 行高 + y 轴 Token 刻度 + 底部时间轴），Token 图表加 y 轴并删除累计曲线；窄键值对双列；用户轮次默认折叠、t 键展开。
+- 目录缺失交互由五选项简化为「提示新目录或默认 /tmp」。
+- 启动优化：FTS `Populate`/`Rebuild` 单事务、`list` Token 加载 LEFT JOIN 去 N+1、timeline 事件批量事务、`ResolveWorkingDirs` 按唯一目录去重（`talea index` 3.6s→0.75s）。
+- i18n：新增 `internal/i18n`，默认英文、`LANG/LC_ALL` 为 zh* 时中文；TUI/CLI 输出与错误消息全部走翻译。
+- list/go 列名 `CWD` → `Path`；`SessionColumns` 改为函数在渲染时解析语言。
+- 会话列表 agent 列固定 10 宽（容纳 claudecode）保证对齐。
+- 删除空目录 `migrations/`（迁移内联在 `internal/index/db.go`）与 `testdata/opencode/`（opencode 测试动态生成 DB）。

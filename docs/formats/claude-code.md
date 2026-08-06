@@ -4,7 +4,7 @@
 
 | 项 | 值 |
 |----|-----|
-| 版本 | 2.1.216（`claude --version` 实测） |
+| 版本 | 2.1.223（`claude --version` 实测，2026-08-06） |
 | 二进制 | `~/.npm-global/bin/claude` |
 | 数据目录 | `~/.claude/` |
 | 会话文件 | `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl` |

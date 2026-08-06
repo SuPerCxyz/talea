@@ -32,7 +32,7 @@ Agent、会话 ID、工作目录、开始时间或恢复命令，一条 `talea` 
 |-------|---------|---------|
 | Claude Code | `~/.claude/projects/...` | `claude --resume <id>` |
 | Codex CLI | `~/.codex/sessions/...` | `codex resume <id>` |
-| OpenCode | `~/.local/share/opencode/opencode.db` | `opencode run -s <id>` |
+| OpenCode | `~/.local/share/opencode/opencode.db` | `opencode -s <id>` |
 
 支持 linux/amd64 与 linux/arm64，构建为单二进制，无 Python/Node/浏览器/外部
 数据库依赖。
@@ -60,8 +60,8 @@ talea search "multipath"
 # 列出最近会话
 talea list
 
-# 恢复指定会话（干跑查看参数）
-talea go --agent claude-code <session-id> --dry-run
+# 恢复指定会话（干跑查看参数；ID 支持前缀自动匹配）
+talea go <session-id> --dry-run
 
 # 交互式选择会话并进入
 talea go
@@ -79,16 +79,17 @@ talea doctor
 talea                          # TUI 主界面
 talea list                     # 列表（--agent/--cwd/--today/--active/--sort/--limit）
 talea search "关键词"            # 跨 Agent 全文搜索
-talea go <session-id>           # 进入会话（--dry-run/--cwd/--agent）；无 ID 时交互式选择
+talea go <session-id>           # 进入会话（ID 完整或前缀自动匹配；--dry-run/--cwd）；无 ID 时交互式选择
 talea last                      # 当前目录最近会话
 talea index                     # 增量索引（--rebuild/--metadata-only）
-talea usage <session-id>        # Token 汇总（--details/--include-subagents/--cost）
+talea usage <session-id>        # Token 汇总（--details/--include-subagents/--metrics）
 talea timeline <session-id>     # Token 时间线（--group-by/--bucket/--around-peak/--by-model/--context/--insights）
 talea doctor                    # 环境诊断（--json/--agent）
 talea run <agent>               # 包装启动 Agent（记录真实进程时间）
 talea watch                     # 监听 Agent 数据目录，变化时增量索引
 talea web                       # 本地只读 Web 视图（仅 localhost）
-talea tag <session-id> [标签...] # 标签 / 收藏 / 备注
+talea tag <session-id> [标签...] # 标签 / 收藏 / 备注（tag list|favorite|note）
+talea preview <session-id>      # 对话预览（--limit/--system/--tail）
 talea export <文件>             # 导出全部会话（含标签，跨设备迁移）
 talea import <文件>             # 导入会话（已存在跳过）
 talea config path|init|validate
@@ -96,6 +97,25 @@ talea version
 ```
 
 输出格式支持 `--format table|json|jsonl|csv|markdown`。
+
+## TUI 界面
+
+```text
+talea          # 会话列表（最近 500 条）
+```
+
+- `↑/↓` 选择，`Enter` 直接恢复会话，`d` 进入详情，`o` 恢复当前会话，
+  `/` 过滤，`q` 退出。
+- 详情页（`d`）聚合展示：会话信息（双列布局）、第一次提问、用户轮次（`t` 键
+  展开/收起）、上下文窗口曲线（面积图，带 y 轴 Token 刻度与时间轴）、按模型
+  汇总、Token 图表、Token 汇总、子 Agent 会话。
+- 列表行 agent 名固定 10 宽对齐，desc 显示开始/结束/时长/Token/路径/分支。
+- 后台自动增量索引，列表随新会话出现自动刷新，无需手动 `talea index`。
+
+## 界面语言
+
+默认英文；当终端 `LANG` / `LC_ALL` / `LC_MESSAGES` / `LANGUAGE` 以 `zh`
+开头时自动切换中文，覆盖 TUI、CLI 输出、命令帮助与错误消息。
 
 ## Token 时间线
 
