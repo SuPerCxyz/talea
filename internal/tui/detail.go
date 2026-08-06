@@ -22,6 +22,7 @@ import (
 var (
 	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
 	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
 // detailModel 是会话详情视图。
@@ -32,33 +33,55 @@ type detailModel struct {
 	sess   *model.Session
 	view   viewport.Model
 	ready  bool
-	tab    string // "" 详情, "timeline", "context", "model", "preview"
 	width  int
 	height int
 }
 
-// render 渲染当前 tab 内容。
+// render 渲染详情页全部内容（聚合展示，viewport 滚动查看）。
 func (d *detailModel) render() string {
-	switch d.tab {
-	case "timeline":
-		return d.renderTimeline()
-	case "context":
-		return d.renderContext()
-	case "model":
-		return d.renderModel()
-	case "turns":
-		return d.renderTurns()
-	case "charts":
-		return d.renderCharts()
-	case "usage":
-		return d.renderUsageSummary()
-	case "subagents":
-		return d.renderSubagents()
-	case "preview":
-		return d.renderPreview()
-	default:
-		return d.renderDetail()
+	if d.sess == nil {
+		return "会话数据为空"
 	}
+	var sb strings.Builder
+	sb.WriteString(d.renderDetail())
+	sb.WriteString("\n\n" + titleStyle.Render("Token 时间线") + "\n")
+	sb.WriteString(sectionOr(d.renderTimeline()))
+	sb.WriteString("\n\n" + titleStyle.Render("上下文窗口曲线") + "\n")
+	sb.WriteString(sectionOr(d.renderContext()))
+	sb.WriteString("\n\n" + titleStyle.Render("按模型汇总") + "\n")
+	sb.WriteString(sectionOr(d.renderModel()))
+	sb.WriteString("\n\n" + titleStyle.Render("用户轮次") + "\n")
+	sb.WriteString(sectionOr(d.renderTurns()))
+	sb.WriteString("\n\n" + titleStyle.Render("Token 图表") + "\n")
+	sb.WriteString(sectionOr(d.renderCharts()))
+	sb.WriteString("\n\n" + titleStyle.Render("Token 汇总") + "\n")
+	sb.WriteString(sectionOr(d.renderUsageSummary()))
+	sb.WriteString("\n\n" + titleStyle.Render("子 Agent 会话") + "\n")
+	sb.WriteString(sectionOr(d.renderSubagents()))
+	if d.app != nil {
+		sb.WriteString("\n\n" + titleStyle.Render("对话预览") + "\n")
+		sb.WriteString(sectionOr(d.renderPreview()))
+	}
+	sb.WriteString("\n\n" + labelStyle.Render("按键：o 恢复  esc/q 返回列表  ↑/↓ 滚动"))
+	return sb.String()
+}
+
+// sectionOr 返回子渲染内容；剥离其自带标题行，nil 场景返回降级提示。
+func sectionOr(s string) string {
+	if s == "" {
+		return "（无数据）\n"
+	}
+	// 错误/空数据消息直接展示
+	if strings.HasPrefix(s, "数据库不可用") || strings.HasPrefix(s, "加载") ||
+		strings.HasPrefix(s, "该会话") || strings.HasPrefix(s, "没有") ||
+		strings.HasPrefix(s, "会话格式") {
+		return s + "\n"
+	}
+	// 剥离首行标题（聚合时已加标题）
+	if i := strings.Index(s, "\n"); i >= 0 {
+		return s[i+1:] + "\n"
+	}
+	return s + "\n"
 }
 
 // renderTimeline 渲染请求级时间线。
@@ -86,7 +109,7 @@ func (d *detailModel) renderTimeline() string {
 		}
 		sb.WriteString(fmt.Sprintf("%s  %-18s  %s\n", ts, string(e.EventType), timelineDesc(e)))
 	}
-	sb.WriteString("\n按 h 返回详情")
+	// 聚合展示，无需 tab 返回
 	return sb.String()
 }
 
@@ -121,7 +144,7 @@ func (d *detailModel) renderContext() string {
 			sb.WriteString(fmt.Sprintf("  %s → %s（%s）\n", humanNum(c.Before), humanNum(c.After), label))
 		}
 	}
-	sb.WriteString("\n按 h 返回详情")
+	// 聚合展示，无需 tab 返回
 	return sb.String()
 }
 
@@ -144,7 +167,7 @@ func (d *detailModel) renderModel() string {
 		sb.WriteString(fmt.Sprintf("%-24s  %-8d  %-10s  %-10s  %-10s\n",
 			m.Model, m.Requests, humanNum(m.InputTokens), humanNum(m.OutputTokens), humanNum(m.TotalTokens)))
 	}
-	sb.WriteString("\n按 h 返回详情")
+	// 聚合展示，无需 tab 返回
 	return sb.String()
 }
 
@@ -178,7 +201,7 @@ func (d *detailModel) renderPreview() string {
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("按 h 返回详情")
+	// 聚合展示，无需 tab 返回
 	return sb.String()
 }
 
@@ -201,7 +224,7 @@ func (d *detailModel) renderTurns() string {
 		sb.WriteString(fmt.Sprintf("%-5d  %-30s  %-6d  %-10s\n",
 			t.Index, truncRunes(t.Prompt, 28), t.Requests, humanNum(t.Total)))
 	}
-	sb.WriteString("\n按 h 返回详情")
+	// 聚合展示，无需 tab 返回
 	return sb.String()
 }
 
@@ -240,7 +263,7 @@ func (d *detailModel) renderCharts() string {
 	sb.WriteString(labelStyle.Render("累计 Token 曲线：") + "\n")
 	sb.WriteString(chart.Line(cumVals, 50) + "\n")
 
-	sb.WriteString("\n按 h 返回详情")
+	// 聚合展示，无需 tab 返回
 	return sb.String()
 }
 
@@ -270,7 +293,7 @@ func (d *detailModel) renderUsageSummary() string {
 	if u.IsEstimated {
 		sb.WriteString("\n注：部分数值为估算值\n")
 	}
-	sb.WriteString("\n按 h 返回详情")
+	// 聚合展示，无需 tab 返回
 	return sb.String()
 }
 
@@ -312,7 +335,7 @@ func (d *detailModel) renderSubagents() string {
 	if !found {
 		sb.WriteString("该会话没有子 Agent 会话\n")
 	}
-	sb.WriteString("\n按 h 返回详情")
+	// 聚合展示，无需 tab 返回
 	return sb.String()
 }
 
@@ -356,8 +379,12 @@ func (d *detailModel) renderDetail() string {
 	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("会话 ID："), valueStyle.Render(s.SessionID)))
 	sb.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("状态："), valueStyle.Render(activityText(s.Activity))))
 
-	sb.WriteString("\n" + labelStyle.Render("第一次提问：") + "\n")
-	sb.WriteString(fmt.Sprintf("%s\n", valueStyle.Render(firstQuestionOrFallback(s))))
+	sb.WriteString("\n" + labelStyle.Render("第一次提问（完整内容滚动查看）：") + "\n")
+	q := firstQuestionOrFallback(s)
+	sb.WriteString(fmt.Sprintf("%s\n", valueStyle.Render(truncateLines(q, 5))))
+	if lineCount(q) > 5 {
+		sb.WriteString(fmt.Sprintf("%s\n", dimStyle.Render(fmt.Sprintf("（共 %d 行，向下滚动查看完整）", lineCount(q)))))
+	}
 
 	if s.StartedAt != nil {
 		sb.WriteString(fmt.Sprintf("\n%s %s\n", labelStyle.Render("开始时间："), valueStyle.Render(s.StartedAt.Format("2006-01-02 15:04:05"))))
@@ -435,6 +462,23 @@ func firstQuestionOrFallback(s *model.Session) string {
 		return s.FirstQuestion
 	}
 	return "未识别到有效用户提问"
+}
+
+// lineCount 统计字符串行数。
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return 1 + strings.Count(s, "\n")
+}
+
+// truncateLines 截断为前 max 行，超出加省略行。
+func truncateLines(s string, max int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= max {
+		return s
+	}
+	return strings.Join(lines[:max], "\n") + "\n…"
 }
 
 func timeSourceText(src model.TimeSource) string {

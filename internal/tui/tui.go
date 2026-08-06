@@ -331,33 +331,6 @@ func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			return m, m.doResume(m.detail.sess)
 		}
-	case key.Matches(msg, m.keys.Timeline):
-		m.detail.tab = "timeline"
-		return m, nil
-	case key.Matches(msg, m.keys.Context):
-		m.detail.tab = "context"
-		return m, nil
-	case key.Matches(msg, m.keys.Model):
-		m.detail.tab = "model"
-		return m, nil
-	case key.Matches(msg, m.keys.Turns):
-		m.detail.tab = "turns"
-		return m, nil
-	case key.Matches(msg, m.keys.Charts):
-		m.detail.tab = "charts"
-		return m, nil
-	case key.Matches(msg, m.keys.Usage):
-		m.detail.tab = "usage"
-		return m, nil
-	case key.Matches(msg, m.keys.Subags):
-		m.detail.tab = "subagents"
-		return m, nil
-	case key.Matches(msg, m.keys.Preview):
-		m.detail.tab = "preview"
-		return m, nil
-	case key.Matches(msg, key.NewBinding(key.WithKeys("h"))):
-		m.detail.tab = ""
-		return m, nil
 	}
 	var cmd tea.Cmd
 	m.detail.view, cmd = m.detail.view.Update(msg)

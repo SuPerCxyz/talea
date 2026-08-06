@@ -58,40 +58,11 @@ func TestItemFilterValue(t *testing.T) {
 
 func TestDetailRenderEmptyDB(t *testing.T) {
 	d := &detailModel{
-		sess: &model.Session{SessionID: "s", AgentID: model.AgentClaudeCode},
+		sess: &model.Session{SessionID: "s", AgentID: model.AgentClaudeCode, FirstQuestion: "q"},
 	}
-	// 无 db 时各 tab 不崩溃
-	d.tab = "timeline"
+	// 无 db/app 时聚合 render 不崩溃
 	if d.render() == "" {
-		t.Fatal("empty timeline render")
-	}
-	d.tab = "context"
-	if d.render() == "" {
-		t.Fatal("empty context render")
-	}
-	d.tab = "model"
-	if d.render() == "" {
-		t.Fatal("empty model render")
-	}
-	d.tab = "turns"
-	if d.render() == "" {
-		t.Fatal("empty turns render")
-	}
-	d.tab = "charts"
-	if d.render() == "" {
-		t.Fatal("empty charts render")
-	}
-	d.tab = "usage"
-	if d.render() == "" {
-		t.Fatal("empty usage render")
-	}
-	d.tab = "subagents"
-	if d.render() == "" {
-		t.Fatal("empty subagents render")
-	}
-	d.tab = ""
-	if d.render() == "" {
-		t.Fatal("empty detail render")
+		t.Fatal("empty render")
 	}
 }
 
