@@ -262,12 +262,15 @@ func writeTable(w io.Writer, views []SessionView) error {
 	}
 	widths[n-1] = firstW
 
-	sep := make([]string, n)
-	for i, h := range headers {
-		sep[i] = strings.Repeat("-", max(widths[i], len(h)))
+	total := 1 // 行首 1 空格（与 go 一致）
+	for i, w := range widths {
+		if i > 0 {
+			total += 2 // 列间 2 空格（与 go 一致）
+		}
+		total += w
 	}
 	fmt.Fprintf(w, "%s\n", align(headers, widths))
-	fmt.Fprintf(w, "%s\n", align(sep, widths))
+	fmt.Fprintf(w, "%s\n", strings.Repeat("─", total))
 	for _, row := range rows {
 		lines := wrapFirst(row[n-1], firstW)
 		for li, line := range lines {
@@ -335,18 +338,12 @@ func truncateAt(s string, w int) string {
 	return string(out)
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func align(cells []string, widths []int) string {
 	var sb strings.Builder
+	sb.WriteString(" ")
 	for i, c := range cells {
 		if i > 0 {
-			sb.WriteString(" │ ")
+			sb.WriteString("  ")
 		}
 		sb.WriteString(pad(c, widths[i]))
 	}
