@@ -121,7 +121,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 ### Phase 4：CLI 命令面
 
 - [x] `talea list`（--agent/--cwd/--today/--active/--include-subagents/--sort/--limit/--format）
-- [x] `talea open`（含 --dry-run、--cwd 覆盖、路径映射、目录缺失交互）
+- [x] `talea go`（含 --dry-run、--cwd 覆盖、路径映射、目录缺失交互；无 ID 交互式选择）
 - [x] `talea usage` / `talea timeline`（P1 前置的 CLI 骨架）
 - [x] `talea last` / `talea config path|init|validate`
 - [x] `talea doctor`（骨架 → Phase 6 完善）
@@ -179,7 +179,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 ### P1 增强与 P2（已完成）
 
 - [x] 活动状态检测（/proc 进程 + 文件更新时间，`list --active` 生效）
-- [x] 目录缺失交互处理（open 五选项，非 TTY 自动取消）
+- [x] 目录缺失交互处理（go 五选项，非 TTY 自动取消）
 - [x] search/list 过滤补全（--project / --branch）
 - [x] doctor 增强（索引格式/Token 完整性/FTS/路径映射冲突）
 - [x] 会话标签 / 收藏 / 备注（`talea tag`）
@@ -215,7 +215,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 ## 6. 验收对照
 
-- P0 完成：`doctor` / `list` / `search` / `go --dry-run`（原 open，已合并） / TUI Enter 恢复，全绿。
+- P0 完成：`doctor` / `list` / `search` / `go --dry-run` / TUI Enter 恢复，全绿。
 - P1 完成：`usage` / `timeline` 全字段展示。
 
 ## 7. 风险与缓解
