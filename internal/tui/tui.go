@@ -211,9 +211,6 @@ func sessionDesc(s *model.Session) string {
 	if s.WorkingDirectory != "" {
 		segs = append(segs, seg{"目录", shortHome(s.WorkingDirectory), false})
 	}
-	if s.GitBranch != "" {
-		segs = append(segs, seg{"分支", s.GitBranch, false})
-	}
 	if s.Activity == model.ActivityActive {
 		segs = append(segs, seg{"状态", "进行中", false})
 	}
@@ -221,7 +218,7 @@ func sessionDesc(s *model.Session) string {
 		return s.SessionID
 	}
 	// 前缀固定 6 显示宽；时长/Token 值右对齐 9 宽保证跨行对齐，
-	// 目录/分支等长文本左对齐不限制
+	// 目录等长文本左对齐不限制
 	var sb strings.Builder
 	for i, g := range segs {
 		if i > 0 {
