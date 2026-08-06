@@ -343,7 +343,7 @@ func showRateChart(ctx context.Context, db *index.DB, sess *model.Session, kind 
 	labels := make([]string, len(buckets))
 	for i, b := range buckets {
 		vals[i] = float64(b.TotalTokens) / 5.0
-		labels[i] = b.Start.Format("15:04")
+		labels[i] = b.Start.Format("01-02 15:04")
 	}
 	fmt.Println(i18n.Tr("Tokens/min bar chart (5-min buckets):", "Token/分钟 柱状图（每 5 分钟桶）："))
 	fmt.Println(chart.Bar(vals, labels, 8))
@@ -408,11 +408,11 @@ func showContext(ctx context.Context, db *index.DB, sess *model.Session, outputF
 	}
 	comps, _ := timeline.DetectCompactions(ctx, db, sess.AgentInstanceID, sess.SessionID)
 	fmt.Fprintf(w, i18n.Tr("Context window curve (%d sample points):\n\n", "上下文窗口曲线（%d 个采样点）：\n\n"), len(pts))
-	fmt.Fprintf(w, "%-10s  %-10s  %-10s  %-12s\n",
+	fmt.Fprintf(w, "%-12s  %-10s  %-10s  %-12s\n",
 		i18n.Tr("Time", "时间"), i18n.Tr("Context", "上下文"), i18n.Tr("Limit", "上限"), i18n.Tr("Change", "变化"))
 	for _, p := range pts {
-		fmt.Fprintf(w, "%-10s  %-10s  %-10s  %+s\n",
-			time.Unix(p.Timestamp, 0).Format("15:04:05"),
+		fmt.Fprintf(w, "%-12s  %-10s  %-10s  %+s\n",
+			time.Unix(p.Timestamp, 0).Format("01-02 15:04:05"),
 			human(p.Context), human(p.ContextLimit), signedHuman(p.Change))
 	}
 	if len(comps) > 0 {
@@ -424,11 +424,11 @@ func showContext(ctx context.Context, db *index.DB, sess *model.Session, outputF
 			}
 			if c.Before > 0 && c.After > 0 {
 				fmt.Fprintf(w, i18n.Tr("  %s: before %s, after %s, reduced %s, ratio %.1f%% (%s)\n", "  %s：压缩前 %s，压缩后 %s，减少 %s，压缩率 %.1f%%（%s）\n"),
-					time.Unix(c.Timestamp, 0).Format("15:04:05"),
+					time.Unix(c.Timestamp, 0).Format("01-02 15:04:05"),
 					human(c.Before), human(c.After), human(c.Reduced), c.Ratio*100, label)
 			} else {
 				// 明确压缩事件但无前后数值（Agent 仅记录事件）
-				fmt.Fprintf(w, i18n.Tr("  %s: (%s)\n", "  %s：（%s）\n"), time.Unix(c.Timestamp, 0).Format("15:04:05"), label)
+				fmt.Fprintf(w, i18n.Tr("  %s: (%s)\n", "  %s：（%s）\n"), time.Unix(c.Timestamp, 0).Format("01-02 15:04:05"), label)
 			}
 		}
 	}
@@ -520,12 +520,12 @@ func writeBuckets(w io.Writer, ctx context.Context, db *index.DB, sess *model.Se
 		}
 		return nil
 	default:
-		fmt.Fprintf(w, "%-8s  %-8s  %-8s  %-10s  %-10s  %-10s\n",
+		fmt.Fprintf(w, "%-12s  %-12s  %-8s  %-10s  %-10s  %-10s\n",
 			i18n.Tr("Start", "开始"), i18n.Tr("End", "结束"), i18n.Tr("Requests", "请求"),
 			i18n.Tr("Input", "输入"), i18n.Tr("Output", "输出"), i18n.Tr("Total", "总计"))
 		for _, b := range buckets {
-			fmt.Fprintf(w, "%-8s  %-8s  %-8d  %-10s  %-10s  %-10s\n",
-				b.Start.Format("15:04"), b.End.Format("15:04"), b.Requests,
+			fmt.Fprintf(w, "%-12s  %-12s  %-8d  %-10s  %-10s  %-10s\n",
+				b.Start.Format("01-02 15:04"), b.End.Format("01-02 15:04"), b.Requests,
 				human(b.InputTokens), human(b.OutputTokens), human(b.TotalTokens))
 		}
 		return nil
@@ -611,7 +611,7 @@ func fmtTS(t *time.Time) string {
 	if t == nil {
 		return i18n.Tr("unknown", "未知")
 	}
-	return t.Format("15:04:05")
+	return t.Format("01-02 15:04:05")
 }
 
 func preview(s string) string {
@@ -699,7 +699,7 @@ func writeTurns(w io.Writer, turns []timeline.TurnUsage, format output.Format) e
 		cw.Write([]string{"turn", "prompt", "started_at", "ended_at", "requests", "total", "input", "output", "reasoning"})
 		for _, t := range turns {
 			cw.Write([]string{fmt.Sprint(t.Index), t.Prompt,
-				t.StartedAt.Format("15:04:05"), t.EndedAt.Format("15:04:05"),
+				t.StartedAt.Format("01-02 15:04:05"), t.EndedAt.Format("01-02 15:04:05"),
 				fmt.Sprint(t.Requests), fmt.Sprint(t.Total), fmt.Sprint(t.Input),
 				fmt.Sprint(t.Output), fmt.Sprint(t.Reasoning)})
 		}

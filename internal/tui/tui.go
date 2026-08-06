@@ -210,8 +210,8 @@ func sessionTitle(s *model.Session) string {
 	if q == "" {
 		q = i18n.Tr("No valid user question detected", "未识别到有效用户提问")
 	}
-	// 固定 agent 列（8 宽左对齐）与时间列（11 宽），保证各行对齐
-	return fmt.Sprintf("[%-8s] %s  %s", agent, timeStr, q)
+	// 固定 agent 列（10 宽左对齐，容纳 claudecode）与时间列（11 宽），保证各行对齐
+	return fmt.Sprintf("[%s] %s  %s", padDisplay(agent, 10), timeStr, q)
 }
 
 func sessionDesc(s *model.Session) string {

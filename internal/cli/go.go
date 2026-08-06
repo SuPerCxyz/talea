@@ -25,14 +25,13 @@ import (
 
 func newGoCmd() *cobra.Command {
 	var (
-		agentFlag  string
 		cwdFlag    string
 		dryRunFlag bool
 	)
 	cmd := &cobra.Command{
 		Use:   "go [session-id]",
-		Short: i18n.Tr("interactively pick a session and enter it", "交互式选择会话并进入"),
-		Long:  i18n.Tr("Without a session ID, opens an interactive table picker; select and press Enter to resume. With a session ID, resumes directly.", "不带会话 ID 时进入交互式表格选择器，选中后 Enter 恢复；带会话 ID 时直接恢复。"),
+		Short: i18n.Tr("pick a session by ID (full or prefix) and resume it", "按会话 ID（完整或前缀）选择并进入"),
+		Long:  i18n.Tr("With a session ID, resumes it directly; the ID may be a full or partial prefix and is matched automatically. If the prefix is ambiguous, lists matching sessions. Without a session ID, opens an interactive table picker; select and press Enter to resume.", "带会话 ID 时直接恢复，ID 可为完整或前缀片段并自动匹配；前缀有歧义时列出候选。不带会话 ID 时进入交互式表格选择器，选中后 Enter 恢复。"),
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -41,7 +40,7 @@ func newGoCmd() *cobra.Command {
 				return err
 			}
 			if len(args) == 1 {
-				sess, err := findSession(ctx, a, args[0], agentFlag)
+				sess, err := findSession(ctx, a, args[0], "")
 				if err != nil {
 					return err
 				}
@@ -53,7 +52,6 @@ func newGoCmd() *cobra.Command {
 			return goSelect(ctx, a)
 		},
 	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("agent ID", "Agent 标识"))
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("target directory (override original)", "目标目录（覆盖原目录）"))
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, i18n.Tr("print resume command only", "仅打印恢复命令"))
 	return cmd
