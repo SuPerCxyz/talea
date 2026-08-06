@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -57,14 +58,11 @@ func Run(ctx context.Context) error {
 
 	m := newMain(ctx, a, sessions, db)
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		return err
+	_, err = p.Run()
+	if m.errMsg != "" {
+		fmt.Fprintln(os.Stderr, "talea:", m.errMsg)
 	}
-	// Bubble Tea 已退出并恢复终端，此时执行选中的会话恢复
-	if m.picked != nil {
-		return resumeSession(ctx, a, m.picked, "", false)
-	}
-	return nil
+	return err
 }
 
 // resumeSession 执行会话恢复（复用 cli 包逻辑）。
@@ -92,6 +90,18 @@ func resumeSession(ctx context.Context, a *app.App, s *model.Session, cwd string
 	return resume.Exec(plan)
 }
 
+// doResume 在 alt screen 回调内直接恢复会话（进程替换后 agent 界面覆盖当前画面）。
+func (m *mainModel) doResume(s *model.Session) tea.Cmd {
+	return func() tea.Msg {
+		if err := resumeSession(m.ctx, m.app, s, "", false); err != nil {
+			return resumeErrMsg{err: err}
+		}
+		return nil
+	}
+}
+
+type resumeErrMsg struct{ err error }
+
 // mainModel 是主 TUI 模型。
 type mainModel struct {
 	ctx      context.Context
@@ -104,7 +114,7 @@ type mainModel struct {
 	help     help.Model
 	width    int
 	height   int
-	picked   *model.Session
+	errMsg   string
 }
 
 type keyMap struct {
@@ -294,8 +304,7 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.Open), key.Matches(msg, m.keys.Enter):
 			if it, ok := m.list.SelectedItem().(item); ok {
-				m.picked = it.sess
-				return m, tea.Quit
+				return m, m.doResume(it.sess)
 			}
 		case key.Matches(msg, m.keys.Detail):
 			if it, ok := m.list.SelectedItem().(item); ok {
@@ -303,6 +312,10 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+	case resumeErrMsg:
+		// 恢复失败：记录错误并退出 TUI
+		m.errMsg = msg.err.Error()
+		return m, tea.Quit
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
@@ -316,8 +329,7 @@ func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, m.keys.Open):
 		if m.detail != nil {
-			m.picked = m.detail.sess
-			return m, tea.Quit
+			return m, m.doResume(m.detail.sess)
 		}
 	case key.Matches(msg, m.keys.Timeline):
 		m.detail.tab = "timeline"
