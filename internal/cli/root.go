@@ -60,7 +60,6 @@ func NewRootCmd() *cobra.Command {
 	root.SetVersionTemplate("{{.Version}}\n")
 	root.AddCommand(newListCmd())
 	root.AddCommand(newSearchCmd())
-	root.AddCommand(newOpenCmd())
 	root.AddCommand(newGoCmd())
 	root.AddCommand(newLastCmd())
 	root.AddCommand(newIndexCmd())

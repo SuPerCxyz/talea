@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -18,35 +17,6 @@ import (
 	"github.com/talea/talea/internal/resume"
 	"github.com/talea/talea/internal/search"
 )
-
-func newOpenCmd() *cobra.Command {
-	var (
-		agentFlag  string
-		cwdFlag    string
-		dryRunFlag bool
-	)
-	cmd := &cobra.Command{
-		Use:   "open <session-id>",
-		Short: "恢复会话",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			a, err := app.New(ctx)
-			if err != nil {
-				return err
-			}
-			sess, err := findSession(ctx, a, args[0], agentFlag)
-			if err != nil {
-				return err
-			}
-			return resumeSession(ctx, a, sess, cwdFlag, dryRunFlag)
-		},
-	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "目标目录（覆盖原目录）")
-	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "仅打印恢复命令")
-	return cmd
-}
 
 func newLastCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -293,5 +263,3 @@ func dirExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
 }
-
-var _ = errors.Is

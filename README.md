@@ -61,7 +61,10 @@ talea search "multipath"
 talea list
 
 # 恢复指定会话（干跑查看参数）
-talea open --agent claude-code <session-id> --dry-run
+talea go --agent claude-code <session-id> --dry-run
+
+# 交互式选择会话并进入
+talea go
 
 # 当前目录最近会话
 talea last
@@ -76,7 +79,7 @@ talea doctor
 talea                          # TUI 主界面
 talea list                     # 列表（--agent/--cwd/--today/--active/--sort/--limit）
 talea search "关键词"            # 跨 Agent 全文搜索
-talea open <session-id>         # 恢复会话（--dry-run/--cwd/--agent）
+talea go <session-id>           # 进入会话（--dry-run/--cwd/--agent）；无 ID 时交互式选择
 talea last                      # 当前目录最近会话
 talea index                     # 增量索引（--rebuild/--metadata-only）
 talea usage <session-id>        # Token 汇总（--details/--include-subagents/--cost）

@@ -215,7 +215,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 ## 6. 验收对照
 
-- P0 完成：`doctor` / `list` / `search` / `open --dry-run` / TUI Enter 恢复，全绿。
+- P0 完成：`doctor` / `list` / `search` / `go --dry-run`（原 open，已合并） / TUI Enter 恢复，全绿。
 - P1 完成：`usage` / `timeline` 全字段展示。
 
 ## 7. 风险与缓解

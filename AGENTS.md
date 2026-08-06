@@ -85,5 +85,5 @@ testdata/{claude,codex,opencode}/   # 脱敏测试夹具
 
 - `go vet` 通过、`golangci-lint` 通过、`go test ./...` 通过。
 - linux/amd64 与 linux/arm64 均构建通过。
-- `talea doctor` 识别本机 Agent；`talea list` 展示全部必填字段；`talea search` 中文可用；`talea open --dry-run` 输出正确目录与参数；TUI Enter 正确恢复。
+- `talea doctor` 识别本机 Agent；`talea list` 展示全部必填字段；`talea search` 中文可用；`talea go --dry-run` 输出正确目录与参数；TUI Enter 正确恢复。
 - 单损坏文件不退出；Agent 数据库只读；索引权限 0600。
