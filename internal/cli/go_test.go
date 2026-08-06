@@ -11,6 +11,8 @@ func int64p(n int64) *int64 { return &n }
 
 func TestGoRow(t *testing.T) {
 	start := time.Date(2026, 8, 5, 16, 41, 0, 0, time.Local)
+	end := time.Date(2026, 8, 5, 17, 0, 0, 0, time.Local)
+	dur := 19 * time.Minute
 	cases := []struct {
 		name string
 		sess *model.Session
@@ -22,11 +24,13 @@ func TestGoRow(t *testing.T) {
 				AgentID:          model.AgentClaudeCode,
 				SessionID:        "abc123",
 				StartedAt:        &start,
+				EndedAt:          &end,
+				Duration:         &dur,
 				FirstQuestion:    "修复登录 bug",
 				WorkingDirectory: "/home/user/proj",
 				TokenUsage:       &model.TokenUsage{TotalTokens: int64p(1400000)},
 			},
-			want: []string{"claude-code", "abc123", "08-05 16:41", "1.40M", "~/proj", "修复登录 bug"},
+			want: []string{"claude-code", "abc123", "08-05 16:41", "08-05 17:00", "19m 0s", "1.40M", "~/proj", "修复登录 bug"},
 		},
 		{
 			name: "empty optional",
@@ -34,7 +38,7 @@ func TestGoRow(t *testing.T) {
 				AgentID:   model.AgentOpenCode,
 				SessionID: "ses_xyz",
 			},
-			want: []string{"opencode", "ses_xyz", "", "未知", "", ""},
+			want: []string{"opencode", "ses_xyz", "", "", "未知", "未知", "", ""},
 		},
 	}
 	for _, c := range cases {

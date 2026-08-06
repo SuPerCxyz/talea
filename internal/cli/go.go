@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -101,7 +102,10 @@ func goSelect(ctx context.Context, a *app.App) error {
 		sessions = append(sessions, &results[i].Session)
 	}
 	a.ResolveWorkingDirs(ctx, sessions)
-	a.SortSessions(sessions)
+	// 选择器按会话结束时间降序排序（最新结束在前）
+	sort.SliceStable(sessions, func(i, j int) bool {
+		return endTs(sessions[i]) > endTs(sessions[j])
+	})
 
 	m := newGoModel(ctx, a, sessions)
 	// alt screen：界面全屏且退出时自动恢复终端，避免残留
@@ -122,6 +126,8 @@ func goRow(s *model.Session) table.Row {
 		string(s.AgentID),
 		s.SessionID,
 		goTime(s.StartedAt),
+		goTime(s.EndedAt),
+		output.FormatDuration(s.Duration),
 		output.FormatTokens(s.TokenUsage),
 		shortHome(s.WorkingDirectory),
 		firstLine(s.FirstQuestion),
@@ -132,7 +138,9 @@ func newGoModel(ctx context.Context, a *app.App, sessions []*model.Session) *goM
 	columns := []table.Column{
 		{Title: "Agent", Width: 12},
 		{Title: "Session ID", Width: 30},
-		{Title: "Time", Width: 12},
+		{Title: "Start", Width: 12},
+		{Title: "End", Width: 12},
+		{Title: "Time", Width: 10},
 		{Title: "Tokens", Width: 9},
 		{Title: "CWD", Width: 24},
 		{Title: "First Question", Width: 80},
@@ -205,6 +213,20 @@ func goTime(t *time.Time) string {
 		return ""
 	}
 	return t.Format("01-02 15:04")
+}
+
+// endTs 返回会话结束时间的 Unix 秒（无结束时间用开始时间兜底）。
+func endTs(s *model.Session) int64 {
+	if s.EndedAt != nil {
+		return s.EndedAt.Unix()
+	}
+	if s.StartedAt != nil {
+		return s.StartedAt.Unix()
+	}
+	if s.LastActivityAt != nil {
+		return s.LastActivityAt.Unix()
+	}
+	return 0
 }
 
 func shortHome(d string) string {
