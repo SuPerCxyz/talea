@@ -118,27 +118,19 @@ type mainModel struct {
 }
 
 type keyMap struct {
-	Open     key.Binding
-	Quit     key.Binding
-	Enter    key.Binding
-	Detail   key.Binding
-	Back     key.Binding
-	Timeline key.Binding
-	Context  key.Binding
-	Model    key.Binding
-	Turns    key.Binding
-	Charts   key.Binding
-	Usage    key.Binding
-	Subags   key.Binding
-	Preview  key.Binding
+	Open   key.Binding
+	Quit   key.Binding
+	Enter  key.Binding
+	Detail key.Binding
+	Back   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Enter, k.Detail, k.Timeline, k.Charts, k.Usage, k.Subags, k.Back, k.Quit}
+	return []key.Binding{k.Enter, k.Detail, k.Open, k.Back, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Enter, k.Detail, k.Timeline, k.Context, k.Model, k.Turns, k.Charts, k.Usage, k.Subags, k.Preview, k.Back, k.Quit}}
+	return [][]key.Binding{{k.Enter, k.Detail, k.Open, k.Back, k.Quit}}
 }
 
 type item struct {
@@ -168,19 +160,11 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *ind
 	l.SetFilteringEnabled(true)
 
 	km := keyMap{
-		Open:     key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "恢复会话")),
-		Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "退出")),
-		Enter:    key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "进入会话")),
-		Detail:   key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "详情")),
-		Back:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "返回列表")),
-		Timeline: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "Token 时间线")),
-		Context:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "上下文曲线")),
-		Model:    key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "模型汇总")),
-		Turns:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "用户轮次")),
-		Charts:   key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "图表")),
-		Usage:    key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "Token 汇总")),
-		Subags:   key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "子 Agent")),
-		Preview:  key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "对话预览")),
+		Open:   key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "恢复会话")),
+		Quit:   key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "退出")),
+		Enter:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "进入会话")),
+		Detail: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "详情")),
+		Back:   key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "返回")),
 	}
 	return &mainModel{
 		ctx:      ctx,
@@ -211,7 +195,7 @@ func sessionDesc(s *model.Session) string {
 	type seg struct {
 		key   string
 		value string
-		valW  int // 值右对齐宽度（0 不限制）
+		valW  int // 值占位宽度（不足补空格，0 不限制）
 	}
 	var segs []seg
 	if s.StartedAt != nil {
@@ -238,8 +222,8 @@ func sessionDesc(s *model.Session) string {
 	if len(segs) == 0 {
 		return s.SessionID
 	}
-	// key 固定 6 显示宽（左对齐），时长/Token/时间值右对齐固定宽，
-	// 保证各段起点跨行对齐且 key 贴近值
+	// key 固定宽（左对齐）使各段起点对齐；value 左对齐补足占位宽，
+	// key 与 value 之间固定 1 空格，间距紧凑
 	const keyW = 6
 	var sb strings.Builder
 	for i, g := range segs {
@@ -248,7 +232,7 @@ func sessionDesc(s *model.Session) string {
 		}
 		sb.WriteString(padDisplay(g.key+" ", keyW))
 		if g.valW > 0 {
-			sb.WriteString(padLeft(g.value, g.valW))
+			sb.WriteString(padRight(g.value, g.valW))
 		} else {
 			sb.WriteString(g.value)
 		}
@@ -264,12 +248,12 @@ func padDisplay(s string, w int) string {
 	return s + strings.Repeat(" ", w-runewidth.StringWidth(s))
 }
 
-// padLeft 右对齐填充到指定显示宽度。
-func padLeft(s string, w int) string {
+// padRight 左对齐填充到指定显示宽度（值不足时补尾随空格，value 起点对齐）。
+func padRight(s string, w int) string {
 	if runewidth.StringWidth(s) >= w {
 		return s
 	}
-	return strings.Repeat(" ", w-runewidth.StringWidth(s)) + s
+	return s + strings.Repeat(" ", w-runewidth.StringWidth(s))
 }
 
 func displayAgent(a model.AgentID) string {

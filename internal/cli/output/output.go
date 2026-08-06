@@ -174,11 +174,11 @@ func FormatSessionTime(t *time.Time) string {
 	return fmtTime(t)
 }
 
-// DisplayAgent 将 Agent ID 转为统一显示名（claude/codex/opencode）。
+// DisplayAgent 将 Agent ID 转为统一显示名（claudecode/codex/opencode）。
 func DisplayAgent(id model.AgentID) string {
 	switch id {
 	case model.AgentClaudeCode:
-		return "claude"
+		return "claudecode"
 	case model.AgentCodexCLI:
 		return "codex"
 	case model.AgentOpenCode:

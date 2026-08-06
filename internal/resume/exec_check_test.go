@@ -3,6 +3,7 @@ package resume
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/talea/talea/internal/adapters"
@@ -27,7 +28,8 @@ func TestExecReplacesProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("helper failed: %v out=%s", err, out)
 	}
-	if string(out) != "RESUME-EXEC-OK\n" {
+	// resetTerminal 会在 Exec 前输出终端恢复序列，标记应出现在输出中
+	if !strings.Contains(string(out), "RESUME-EXEC-OK") {
 		t.Fatalf("unexpected output: %q", string(out))
 	}
 }

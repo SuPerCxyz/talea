@@ -87,8 +87,18 @@ func Exec(plan Plan) error {
 	if err := os.Chdir(plan.TargetDir); err != nil {
 		return fmt.Errorf("无法进入目录 %s: %w", plan.TargetDir, err)
 	}
+	// 恢复终端：退出备用屏幕、显示光标、清屏。TUI 调用时 Bubble Tea
+	// 的 alt screen 清理因进程替换不会执行，需手动恢复，避免退出会话后
+	// 终端错位/光标消失/历史命令失效。
+	resetTerminal()
 	argv := append([]string{binary}, plan.Command.Args...)
 	return syscall.Exec(binary, argv, os.Environ())
+}
+
+// resetTerminal 向终端发送恢复序列（退出备用屏幕、恢复光标、清屏）。
+func resetTerminal() {
+	// rmcup: 退出备用屏幕回到主屏幕；cnorm: 显示光标；clear: 清屏
+	fmt.Fprint(os.Stdout, "\x1b[?1049l\x1b[?25h\x1b[2J\x1b[H")
 }
 
 // ResolveProgram 解析恢复程序路径。
