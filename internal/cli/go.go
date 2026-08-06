@@ -5,7 +5,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -13,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/talea/talea/internal/app"
 	"github.com/talea/talea/internal/cli/output"
@@ -120,38 +120,34 @@ func goSelect(ctx context.Context, a *app.App) error {
 	return nil
 }
 
-// goRow 构造选择器表格行。
+// goRow 构造选择器表格行（与 list 共享列定义）。
 func goRow(s *model.Session) table.Row {
-	return table.Row{
-		string(s.AgentID),
-		s.SessionID,
-		goTime(s.StartedAt),
-		goTime(s.EndedAt),
-		output.FormatDuration(s.Duration),
-		output.FormatTokens(s.TokenUsage),
-		shortHome(s.WorkingDirectory),
-		firstLine(s.FirstQuestion),
-	}
+	v := output.ViewOf(s)
+	return table.Row(output.SessionRow(v))
 }
 
 func newGoModel(ctx context.Context, a *app.App, sessions []*model.Session) *goModel {
-	columns := []table.Column{
-		{Title: "Agent", Width: 12},
-		{Title: "Session ID", Width: 30},
-		{Title: "Start", Width: 12},
-		{Title: "End", Width: 12},
-		{Title: "Time", Width: 10},
-		{Title: "Tokens", Width: 9},
-		{Title: "CWD", Width: 24},
-		{Title: "First Question", Width: 80},
-	}
-	rows := make([]table.Row, 0, len(sessions))
+	rows := make([][]string, 0, len(sessions))
 	for _, s := range sessions {
-		rows = append(rows, goRow(s))
+		rows = append(rows, output.SessionRow(output.ViewOf(s)))
+	}
+	// 与 list 一致的列宽：bubbles 按固定宽度截断，这里按终端宽度计算
+	termW := 120
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 40 {
+		termW = w
+	}
+	widths := output.ColumnWidths(rows, termW)
+	columns := make([]table.Column, 0, len(output.SessionColumns))
+	for i, c := range output.SessionColumns {
+		columns = append(columns, table.Column{Title: c.Title, Width: widths[i]})
+	}
+	tr := make([]table.Row, 0, len(rows))
+	for _, r := range rows {
+		tr = append(tr, table.Row(r))
 	}
 	t := table.New(
 		table.WithColumns(columns),
-		table.WithRows(rows),
+		table.WithRows(tr),
 		table.WithFocused(true),
 		table.WithHeight(10),
 	)
@@ -208,13 +204,6 @@ func (m *goModel) View() string {
 	return sb.String()
 }
 
-func goTime(t *time.Time) string {
-	if t == nil {
-		return ""
-	}
-	return t.Format("01-02 15:04")
-}
-
 // endTs 返回会话结束时间的 Unix 秒（无结束时间用开始时间兜底）。
 func endTs(s *model.Session) int64 {
 	if s.EndedAt != nil {
@@ -227,19 +216,4 @@ func endTs(s *model.Session) int64 {
 		return s.LastActivityAt.Unix()
 	}
 	return 0
-}
-
-func shortHome(d string) string {
-	if d == "" {
-		return ""
-	}
-	if strings.HasPrefix(d, "/home/") {
-		rest := strings.TrimPrefix(d, "/home/")
-		parts := strings.SplitN(rest, "/", 2)
-		if len(parts) == 2 {
-			return "~/" + parts[1]
-		}
-		return "~"
-	}
-	return d
 }

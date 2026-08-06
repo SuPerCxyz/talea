@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
@@ -55,8 +56,39 @@ func Run(ctx context.Context) error {
 
 	m := newMain(ctx, a, sessions, db)
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err = p.Run()
-	return err
+	if _, err := p.Run(); err != nil {
+		return err
+	}
+	// Bubble Tea 已退出并恢复终端，此时执行选中的会话恢复
+	if m.picked != nil {
+		return resumeSession(ctx, a, m.picked, "", false)
+	}
+	return nil
+}
+
+// resumeSession 执行会话恢复（复用 cli 包逻辑）。
+func resumeSession(ctx context.Context, a *app.App, s *model.Session, cwd string, dryRun bool) error {
+	plan, err := resume.Build(*s, cwd, a.Config.PathMapping)
+	if err != nil {
+		return err
+	}
+	if !plan.DirExists {
+		return fmt.Errorf("原工作目录不存在：%s\n可以执行：talea go %s --cwd <新目录>", plan.TargetDir, s.SessionID)
+	}
+	ad, ok := a.Registry.Get(s.AgentID)
+	if !ok {
+		return errors.New("会话格式不支持")
+	}
+	resumer, ok := adapters.As[adapters.Resumer](ad)
+	if !ok {
+		return errors.New("agent 不支持恢复能力")
+	}
+	cmd2, err := resumer.BuildResumeCommand(*s, plan.TargetDir)
+	if err != nil {
+		return err
+	}
+	plan.Command = cmd2
+	return resume.Exec(plan)
 }
 
 // mainModel 是主 TUI 模型。
@@ -71,6 +103,7 @@ type mainModel struct {
 	help     help.Model
 	width    int
 	height   int
+	picked   *model.Session
 }
 
 type keyMap struct {
@@ -157,7 +190,8 @@ func sessionTitle(s *model.Session) string {
 	if q == "" {
 		q = "未识别到有效用户提问"
 	}
-	return fmt.Sprintf("[%s] %s  %s", agent, timeStr, q)
+	// 固定 agent 列（8 宽左对齐）与时间列（11 宽），保证各行对齐
+	return fmt.Sprintf("[%-8s] %s  %s", agent, timeStr, q)
 }
 
 func sessionDesc(s *model.Session) string {
@@ -180,7 +214,26 @@ func sessionDesc(s *model.Session) string {
 	if len(parts) == 0 {
 		return s.SessionID
 	}
-	return strings.Join(parts, "  ·  ")
+	// 每段前缀固定 8 显示宽度（左对齐），时长/Token/目录等值列对齐
+	var sb strings.Builder
+	for i, p := range parts {
+		if i > 0 {
+			sb.WriteString("  ")
+		}
+		colon := strings.IndexByte(p, ' ')
+		if colon > 0 {
+			prefix := p[:colon+1]
+			sb.WriteString(prefix)
+			pad := 8 - runewidth.StringWidth(prefix)
+			if pad > 0 {
+				sb.WriteString(strings.Repeat(" ", pad))
+			}
+			sb.WriteString(p[colon+1:])
+		} else {
+			sb.WriteString(p)
+		}
+	}
+	return sb.String()
 }
 
 func displayAgent(a model.AgentID) string {
@@ -223,7 +276,10 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.Open):
-			return m, m.resumeSelected()
+			if it, ok := m.list.SelectedItem().(item); ok {
+				m.picked = it.sess
+				return m, tea.Quit
+			}
 		case key.Matches(msg, m.keys.Enter):
 			if it, ok := m.list.SelectedItem().(item); ok {
 				m.showDetail(it.sess)
@@ -242,7 +298,10 @@ func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail = nil
 		return m, nil
 	case key.Matches(msg, m.keys.Open):
-		return m, m.resumeDetail()
+		if m.detail != nil {
+			m.picked = m.detail.sess
+			return m, tea.Quit
+		}
 	case key.Matches(msg, m.keys.Timeline):
 		m.detail.tab = "timeline"
 		return m, nil
@@ -275,56 +334,6 @@ func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.detail.view, cmd = m.detail.view.Update(msg)
 	return m, cmd
 }
-
-// resumeSelected 恢复当前选中会话。
-func (m *mainModel) resumeSelected() tea.Cmd {
-	it, ok := m.list.SelectedItem().(item)
-	if !ok {
-		return nil
-	}
-	return m.doResume(it.sess)
-}
-
-func (m *mainModel) resumeDetail() tea.Cmd {
-	if m.detail == nil {
-		return nil
-	}
-	return m.doResume(m.detail.sess)
-}
-
-func (m *mainModel) doResume(s *model.Session) tea.Cmd {
-	plan, err := resume.Build(*s, "", m.app.Config.PathMapping)
-	if err != nil {
-		return func() tea.Msg { return resumeErrMsg{err: err} }
-	}
-	if !plan.DirExists {
-		return func() tea.Msg {
-			return resumeErrMsg{err: fmt.Errorf("原工作目录不存在：%s\n可以执行：talea open %s --cwd <新目录>", plan.TargetDir, s.SessionID)}
-		}
-	}
-	ad, ok := m.app.Registry.Get(s.AgentID)
-	if !ok {
-		return func() tea.Msg { return resumeErrMsg{err: errors.New("会话格式不支持")} }
-	}
-	resumer, ok := adapters.As[adapters.Resumer](ad)
-	if !ok {
-		return func() tea.Msg { return resumeErrMsg{err: errors.New("agent 不支持恢复能力")} }
-	}
-	cmd2, err := resumer.BuildResumeCommand(*s, plan.TargetDir)
-	if err != nil {
-		return func() tea.Msg { return resumeErrMsg{err: err} }
-	}
-	plan.Command = cmd2
-
-	return func() tea.Msg {
-		if err := resume.Exec(plan); err != nil {
-			return resumeErrMsg{err: err}
-		}
-		return nil
-	}
-}
-
-type resumeErrMsg struct{ err error }
 
 // View 渲染。
 func (m *mainModel) View() string {

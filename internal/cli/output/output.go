@@ -169,6 +169,81 @@ func fmtTime(t *time.Time) string {
 	return t.Format("01-02 15:04")
 }
 
+// FormatSessionTime 输出会话时间的短格式（与表格一致）。
+func FormatSessionTime(t *time.Time) string {
+	return fmtTime(t)
+}
+
+// Column 定义表格列：标题、最大宽度（0 不限制）、截断策略。
+type Column struct {
+	Title    string
+	MaxWidth int  // 压缩上限，0 表示不限制
+	HeadTrun bool // 省略开头保留末尾（用于路径）
+}
+
+// SessionColumns 会话列表共享列定义（list 与 go 共用，改一处两处生效）。
+var SessionColumns = []Column{
+	{Title: "Agent"},
+	{Title: "Session ID", MaxWidth: 24},
+	{Title: "Start"},
+	{Title: "End"},
+	{Title: "Time"},
+	{Title: "Tokens"},
+	{Title: "CWD", MaxWidth: 24, HeadTrun: true},
+	{Title: "First Question"},
+}
+
+// SessionRow 构造会话表格行的原始内容（未截断，8 列与 SessionColumns 对应）。
+func SessionRow(v SessionView) []string {
+	return []string{
+		v.Agent,
+		v.SessionID,
+		v.StartedAt,
+		v.EndedAt,
+		v.Duration,
+		v.Tokens,
+		shortDir(v.WorkingDirectory),
+		oneLine(v.FirstQuestion),
+	}
+}
+
+// ColumnWidths 计算各列宽度：非 First Question 列取内容最大但受 MaxWidth 限制，
+// First Question（最后一列）占剩余宽度。
+func ColumnWidths(rows [][]string, termWidth int) []int {
+	n := len(SessionColumns)
+	widths := make([]int, n)
+	for i, c := range SessionColumns {
+		widths[i] = runeLen(c.Title)
+	}
+	for _, r := range rows {
+		for j := 0; j < n-1; j++ {
+			if j < len(r) {
+				if w := runeLen(r[j]); w > widths[j] {
+					widths[j] = w
+				}
+			}
+		}
+	}
+	for i, c := range SessionColumns {
+		if c.MaxWidth > 0 && widths[i] > c.MaxWidth {
+			widths[i] = c.MaxWidth
+		}
+	}
+	sepTotal := 1 // 行首空格
+	for i := 0; i < n-1; i++ {
+		sepTotal += widths[i]
+		if i > 0 {
+			sepTotal += 2
+		}
+	}
+	firstW := termWidth - sepTotal - 2
+	if firstW < 30 {
+		firstW = 30
+	}
+	widths[n-1] = firstW
+	return widths
+}
+
 // Write 输出会话列表。
 func Write(w io.Writer, sessions []*model.Session, format Format) error {
 	views := make([]SessionView, 0, len(sessions))
@@ -236,64 +311,42 @@ func writeMarkdown(w io.Writer, views []SessionView) error {
 }
 
 func writeTable(w io.Writer, views []SessionView) error {
-	headers := []string{"Agent", "Session ID", "Start", "End", "Time", "Tokens", "CWD", "First Question"}
-	n := len(headers)
-	// 每列计算最高宽度（内容与表头的较大值），压缩列设上限
-	const (
-		sessionMax = 24 // Session ID 压缩上限
-		cwdMax     = 24 // CWD 压缩上限
-		firstMin   = 30 // First Question 最小宽度
-	)
-	widths := make([]int, n)
-	for i, h := range headers {
-		widths[i] = runeLen(h)
-	}
+	n := len(SessionColumns)
 	rows := make([][]string, len(views))
 	for i, v := range views {
-		row := []string{v.Agent, v.SessionID, v.StartedAt, v.EndedAt, v.Duration, v.Tokens,
-			shortDir(v.WorkingDirectory), oneLine(v.FirstQuestion)}
-		rows[i] = row
-		for j := 0; j < n-1; j++ {
-			if w := runeLen(row[j]); w > widths[j] {
-				widths[j] = w
+		rows[i] = SessionRow(v)
+	}
+	widths := ColumnWidths(rows, tableWidth())
+
+	// 渲染单元格（应用截断）
+	render := func(row []string) []string {
+		cur := make([]string, n)
+		for j := 0; j < n; j++ {
+			c := SessionColumns[j]
+			if c.HeadTrun {
+				cur[j] = truncateHead(row[j], widths[j])
+			} else {
+				cur[j] = truncateAt(row[j], widths[j])
 			}
 		}
-	}
-	// Session ID、CWD 压缩到上限
-	if widths[1] > sessionMax {
-		widths[1] = sessionMax
-	}
-	if widths[6] > cwdMax {
-		widths[6] = cwdMax
+		return cur
 	}
 
-	// 剩余宽度全部给 First Question（单行）
-	sepTotal := 1 // 行首空格
-	for i := 0; i < n-1; i++ {
-		sepTotal += widths[i]
+	total := 1
+	for i, w := range widths {
 		if i > 0 {
-			sepTotal += 2
+			total += 2
 		}
+		total += w
 	}
-	avail := tableWidth() - sepTotal - 2
-	firstW := avail
-	if firstW < firstMin {
-		firstW = firstMin
+	hd := make([]string, n)
+	for i, h := range SessionColumns {
+		hd[i] = h.Title
 	}
-	widths[n-1] = firstW
-
-	total := sepTotal + firstW
-	fmt.Fprintf(w, "%s\n", align(headers, widths))
+	fmt.Fprintf(w, "%s\n", align(hd, widths))
 	fmt.Fprintf(w, "%s\n", strings.Repeat("─", total))
 	for _, row := range rows {
-		cur := make([]string, n)
-		copy(cur, row)
-		// Session、CWD 压缩截断
-		cur[1] = truncateAt(cur[1], widths[1])
-		cur[6] = truncateHead(cur[6], widths[6])
-		// First Question 单行截断
-		cur[n-1] = truncateAt(cur[n-1], firstW)
-		fmt.Fprintf(w, "%s\n", align(cur, widths))
+		fmt.Fprintf(w, "%s\n", align(render(row), widths))
 	}
 	return nil
 }
