@@ -59,10 +59,8 @@ type ContextPoint struct {
 
 // ContextCurve 生成上下文窗口曲线采样（按 timestamp 排序）。
 // context_after 为累计输入（OpenCode step-finish 语义）。
+// maxPoints<=0 时返回全部点（用于压缩检测）；>0 时抽样显示。
 func ContextCurve(ctx context.Context, db *index.DB, instanceID, sessionID string, maxPoints int) ([]ContextPoint, error) {
-	if maxPoints <= 0 {
-		maxPoints = 100
-	}
 	rows, err := db.SQL().QueryContext(ctx, `
 		SELECT timestamp, context_after, context_limit, total_tokens
 		FROM usage_timeline_events
@@ -95,7 +93,7 @@ func ContextCurve(ctx context.Context, db *index.DB, instanceID, sessionID strin
 			}
 		}
 	}
-	if len(pts) > maxPoints {
+	if maxPoints > 0 && len(pts) > maxPoints {
 		pts = downsample(pts, maxPoints)
 	}
 	for i := range pts {
@@ -130,14 +128,48 @@ type CompactionEvent struct {
 }
 
 // DetectCompactions 检测上下文压缩。
-// 明确压缩：上下文显著下降（超过前值 40% 且下降量 > 10k）。
-// 标记 IsInferred，因为原始数据未直接提供压缩记录。
+// 明确压缩：Agent 数据中的 compaction 事件（如 OpenCode compaction part）。
+// 推断压缩：上下文显著下降（超过前值 40% 且下降量 > 10k）。
 func DetectCompactions(ctx context.Context, db *index.DB, instanceID, sessionID string) ([]CompactionEvent, error) {
-	pts, err := ContextCurve(ctx, db, instanceID, sessionID, 0)
+	var out []CompactionEvent
+
+	// 1) 明确压缩事件（compaction_start）
+	rows, err := db.SQL().QueryContext(ctx, `
+		SELECT timestamp, context_before, context_after FROM usage_timeline_events
+		WHERE agent_instance_id=? AND session_id=? AND event_type='compaction_start'
+		ORDER BY timestamp ASC`, instanceID, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	var out []CompactionEvent
+	for rows.Next() {
+		var (
+			ts, before, after sql.NullInt64
+		)
+		if err := rows.Scan(&ts, &before, &after); err != nil {
+			continue
+		}
+		e := CompactionEvent{Timestamp: ts.Int64, IsInferred: false}
+		if before.Valid {
+			e.Before = before.Int64
+		}
+		if after.Valid {
+			e.After = after.Int64
+		}
+		if e.Before > 0 && e.After > 0 {
+			e.Reduced = e.Before - e.After
+			if e.Before > 0 {
+				e.Ratio = float64(e.Reduced) / float64(e.Before)
+			}
+		}
+		out = append(out, e)
+	}
+	rows.Close()
+
+	// 2) 推断压缩：上下文显著下降
+	pts, err := ContextCurve(ctx, db, instanceID, sessionID, 0)
+	if err != nil {
+		return out, err
+	}
 	for i := 1; i < len(pts); i++ {
 		before := pts[i-1].Context
 		after := pts[i].Context

@@ -490,11 +490,32 @@ func (a *Adapter) IterateUsageEvents(
 			Tool   string          `json:"tool"`
 			CallID string          `json:"callID"`
 			State  json.RawMessage `json:"state"`
+			Auto   *bool           `json:"auto"`
 		}
 		if err := json.Unmarshal([]byte(raw), &p); err != nil {
 			continue
 		}
 		ts := time.UnixMilli(created)
+
+		// 明确压缩事件：compaction part（spec §14.6）
+		if p.Type == "compaction" {
+			ev := &model.UsageTimelineEvent{
+				AgentInstanceID: s.AgentInstanceID,
+				SessionID:       s.SessionID,
+				EventID:         partID,
+				EventType:       model.UsageEventCompactionStart,
+				Timestamp:       &ts,
+				Sequence:        seq,
+				MessageID:       msgID,
+				Source:          model.UsageSourceMessageMetadata,
+				Completeness:    model.UsageComplete,
+				SourceIdentity:  "opencode-compact:" + partID,
+				RawFields:       map[string]any{"auto": p.Auto != nil && *p.Auto},
+			}
+			events = append(events, ev)
+			seq++
+			continue
+		}
 
 		// 工具调用事件：tool part 生成 tool_start/tool_end
 		if p.Type == "tool" {

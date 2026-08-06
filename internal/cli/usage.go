@@ -419,9 +419,14 @@ func showContext(ctx context.Context, db *index.DB, sess *model.Session, outputF
 			if c.IsInferred {
 				label = "可能发生上下文压缩"
 			}
-			fmt.Fprintf(w, "  %s：压缩前 %s，压缩后 %s，减少 %s，压缩率 %.1f%%（%s）\n",
-				time.Unix(c.Timestamp, 0).Format("15:04:05"),
-				human(c.Before), human(c.After), human(c.Reduced), c.Ratio*100, label)
+			if c.Before > 0 && c.After > 0 {
+				fmt.Fprintf(w, "  %s：压缩前 %s，压缩后 %s，减少 %s，压缩率 %.1f%%（%s）\n",
+					time.Unix(c.Timestamp, 0).Format("15:04:05"),
+					human(c.Before), human(c.After), human(c.Reduced), c.Ratio*100, label)
+			} else {
+				// 明确压缩事件但无前后数值（Agent 仅记录事件）
+				fmt.Fprintf(w, "  %s：（%s）\n", time.Unix(c.Timestamp, 0).Format("15:04:05"), label)
+			}
 		}
 	}
 	return nil

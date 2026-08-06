@@ -55,11 +55,30 @@ func Generate(ctx context.Context, db *index.DB, instanceID, sessionID string) (
 
 	// 3. 上下文压缩
 	if comps, err := timeline.DetectCompactions(ctx, db, instanceID, sessionID); err == nil && len(comps) > 0 {
-		rep.Insights = append(rep.Insights, Insight{
-			Type: "compaction",
-			Text: fmt.Sprintf("检测到 %d 次上下文压缩，最大压缩 %s Token（%.1f%%）",
-				len(comps), human(comps[0].Reduced), comps[0].Ratio*100),
-		})
+		// 统计明确与推断
+		explicit := 0
+		var maxReduced int64
+		maxRatio := 0.0
+		for _, c := range comps {
+			if !c.IsInferred {
+				explicit++
+			}
+			if c.Reduced > maxReduced {
+				maxReduced = c.Reduced
+			}
+			if c.Ratio > maxRatio {
+				maxRatio = c.Ratio
+			}
+		}
+		kind := "上下文压缩"
+		if explicit > 0 {
+			kind = fmt.Sprintf("%d 次明确压缩 + %d 次推断压缩", explicit, len(comps)-explicit)
+		}
+		text := fmt.Sprintf("检测到 %s", kind)
+		if maxReduced > 0 {
+			text += fmt.Sprintf("，最大压缩 %s Token（%.1f%%）", human(maxReduced), maxRatio*100)
+		}
+		rep.Insights = append(rep.Insights, Insight{Type: "compaction", Text: text})
 	}
 
 	// 4. 短时间 Token 快速增长
