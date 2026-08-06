@@ -113,7 +113,7 @@ func TestBuildResumeCommand(t *testing.T) {
 	if cmd.Program != "opencode" {
 		t.Fatalf("program: %q", cmd.Program)
 	}
-	if len(cmd.Args) != 3 || cmd.Args[0] != "run" || cmd.Args[1] != "-s" {
+	if len(cmd.Args) != 2 || cmd.Args[0] != "-s" {
 		t.Fatalf("args: %v", cmd.Args)
 	}
 }

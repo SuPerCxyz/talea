@@ -13,7 +13,7 @@ Talea — Trace the session. Resume the work.
 | Codex CLI | 0.146.0，数据 `~/.codex/sessions/<Y>/<M>/<D>/rollout-*.jsonl` |
 | OpenCode | 1.18.13，数据 `~/.local/share/opencode/opencode.db`（SQLite ~6GB） |
 | XDG | 全空 → 使用默认路径 |
-| 恢复命令 | `claude --resume <id>` / `codex resume <id>` / `opencode run -s <id>` |
+| 恢复命令 | `claude --resume <id>` / `codex resume <id>` / `opencode -s <id>` |
 | sqlite3 CLI | 未安装（调查用 Python 只读完成，项目本体零 Python 依赖） |
 
 关键实测发现：

@@ -107,10 +107,12 @@ part.data 类型（实测）：`text`、`reasoning`、`tool`、`step-start`、`s
 ## 恢复命令
 
 ```
-opencode run -s <session-id>
+opencode -s <session-id>
 ```
 
-实测 `opencode run --help` 确认 `-s/--session` 参数。另有 `opencode session list` 可用作校验。
+`opencode` 无子命令时默认进入 TUI，`-s <id>` 直接恢复指定会话（实测 1.18.13 进入
+会话且不要求消息参数）。注意：`opencode run -s <id>` 是"带消息运行"模式，不带消息
+会报 `You must provide a message or a command`，不用于会话恢复。
 
 ## 只读访问要求
 

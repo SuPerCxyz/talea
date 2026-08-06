@@ -21,7 +21,7 @@ Talea 是一个面向 Linux 的本地优先 AI Coding Agent 会话索引、搜�
 |-------|------|---------|---------|
 | Claude Code | 2.1.216 | `~/.claude/projects/<enc-cwd>/<sessionId>.jsonl` | `claude --resume <id>` |
 | Codex CLI | 0.146.0 | `~/.codex/sessions/<Y>/<M>/<D>/rollout-*.jsonl` | `codex resume <id>` |
-| OpenCode | 1.18.13 | `~/.local/share/opencode/opencode.db`（SQLite ~6GB） | `opencode run -s <id>` |
+| OpenCode | 1.18.13 | `~/.local/share/opencode/opencode.db`（SQLite ~6GB） | `opencode -s <id>` |
 
 格式细节见 `docs/formats/{claude-code,codex-cli,opencode}.md`。环境变更后（如版本升级）需重新调查并更新文档，禁止凭经验硬编码未确认格式。
 

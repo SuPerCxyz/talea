@@ -399,7 +399,7 @@ func (a *Adapter) BuildResumeCommand(s model.Session, cwd string) (adapters.Comm
 	}
 	return adapters.Command{
 		Program: "opencode",
-		Args:    []string{"run", "-s", s.SessionID},
+		Args:    []string{"-s", s.SessionID},
 	}, nil
 }
 
