@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"golang.org/x/term"
 
 	"github.com/talea/talea/internal/model"
 )
@@ -235,12 +238,16 @@ func writeMarkdown(w io.Writer, views []SessionView) error {
 func writeTable(w io.Writer, views []SessionView) error {
 	headers := []string{"Agent", "Session ID", "Start", "End", "Time", "Tokens", "CWD", "First Question"}
 	n := len(headers)
+	// 每列计算最高宽度（内容与表头的较大值），压缩列设上限
+	const (
+		sessionMax = 24 // Session ID 压缩上限
+		cwdMax     = 24 // CWD 压缩上限
+		firstMin   = 30 // First Question 最小宽度
+	)
 	widths := make([]int, n)
 	for i, h := range headers {
 		widths[i] = runeLen(h)
 	}
-	// 除 First Question（最后一列）外，各列宽度取内容最大值，保证单行完整显示
-	maxFirst := 0
 	rows := make([][]string, len(views))
 	for i, v := range views {
 		row := []string{v.Agent, v.SessionID, v.StartedAt, v.EndedAt, v.Duration, v.Tokens,
@@ -251,74 +258,78 @@ func writeTable(w io.Writer, views []SessionView) error {
 				widths[j] = w
 			}
 		}
-		if w := runeLen(row[n-1]); w > maxFirst {
-			maxFirst = w
+	}
+	// Session ID、CWD 压缩到上限
+	if widths[1] > sessionMax {
+		widths[1] = sessionMax
+	}
+	if widths[6] > cwdMax {
+		widths[6] = cwdMax
+	}
+
+	// 剩余宽度全部给 First Question（单行）
+	sepTotal := 1 // 行首空格
+	for i := 0; i < n-1; i++ {
+		sepTotal += widths[i]
+		if i > 0 {
+			sepTotal += 2
 		}
 	}
-	// First Question 允许两行：宽度取内容与固定上限的较小值（上限 100）
-	firstW := maxFirst
-	if firstW > 100 {
-		firstW = 100
+	avail := tableWidth() - sepTotal - 2
+	firstW := avail
+	if firstW < firstMin {
+		firstW = firstMin
 	}
 	widths[n-1] = firstW
 
-	total := 1 // 行首 1 空格（与 go 一致）
-	for i, w := range widths {
-		if i > 0 {
-			total += 2 // 列间 2 空格（与 go 一致）
-		}
-		total += w
-	}
+	total := sepTotal + firstW
 	fmt.Fprintf(w, "%s\n", align(headers, widths))
 	fmt.Fprintf(w, "%s\n", strings.Repeat("─", total))
 	for _, row := range rows {
-		lines := wrapFirst(row[n-1], firstW)
-		for li, line := range lines {
-			cur := make([]string, n)
-			if li == 0 {
-				copy(cur, row[:n-1])
-			}
-			cur[n-1] = line
-			fmt.Fprintf(w, "%s\n", align(cur, widths))
-		}
+		cur := make([]string, n)
+		copy(cur, row)
+		// Session、CWD 压缩截断
+		cur[1] = truncateAt(cur[1], widths[1])
+		cur[6] = truncateHead(cur[6], widths[6])
+		// First Question 单行截断
+		cur[n-1] = truncateAt(cur[n-1], firstW)
+		fmt.Fprintf(w, "%s\n", align(cur, widths))
 	}
 	return nil
 }
 
-// wrapFirst 将单行文本按宽度换行，最多两行。
-// 第一行占满宽度且不加省略号（内容续到第二行）；
-// 仅当第二行仍有剩余时才在末尾加省略号。
-func wrapFirst(s string, w int) []string {
-	if s == "" {
-		return []string{""}
+// tableWidth 返回表格可用宽度：COLUMNS 环境变量 > 终端宽度 > 默认 120。
+func tableWidth() int {
+	if v := os.Getenv("COLUMNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 40 {
+			return n
+		}
 	}
-	if runeLen(s) <= w {
-		return []string{s}
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 40 {
+		return w
 	}
-	first := truncateAt(s, w)
-	rest := restAfter(s, w)
-	if rest == "" {
-		return []string{first}
-	}
-	second := rest
-	if runeLen(rest) > w {
-		second = truncateAt(rest, w-1) + "…"
-	}
-	return []string{first, second}
+	return 120
 }
 
-// restAfter 返回按宽度截断 w 后剩余的字符串。
-func restAfter(s string, w int) string {
+// truncateHead 截断字符串开头以适配宽度，保留末尾路径部分。
+// 结果形如 "…/recode"：超过宽度时省略开头，末尾保留。
+func truncateHead(s string, w int) string {
+	if runeLen(s) <= w {
+		return s
+	}
 	runes := []rune(s)
+	// 从末尾反向保留 w-1 宽度 + 省略号
+	var suffix []rune
 	width := 0
-	for i, r := range runes {
-		rw := runewidth.RuneWidth(r)
-		if width+rw > w {
-			return string(runes[i:])
+	for i := len(runes) - 1; i >= 0; i-- {
+		rw := runewidth.RuneWidth(runes[i])
+		if width+rw > w-1 {
+			break
 		}
+		suffix = append([]rune{runes[i]}, suffix...)
 		width += rw
 	}
-	return ""
+	return "…" + string(suffix)
 }
 
 // truncateAt 截断字符串到指定显示宽度（不含省略号）。

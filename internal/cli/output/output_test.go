@@ -63,46 +63,27 @@ func TestViewOf(t *testing.T) {
 	}
 }
 
-func TestWrapFirst(t *testing.T) {
+func TestTruncateHead(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
 		w    int
-		want int // 期望行数
+		want string
 	}{
-		{name: "short", in: "你好", w: 10, want: 1},
-		{name: "exact", in: "1234567890", w: 10, want: 1},
-		{name: "two lines", in: "中文内容足够长需要换行显示两行内容", w: 10, want: 2},
+		{name: "short", in: "abc", w: 10, want: "abc"},
+		{name: "exact", in: "1234567890", w: 10, want: "1234567890"},
+		{name: "long keeps tail", in: "/home/alice/code/recode", w: 13, want: "…/code/recode"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := wrapFirst(c.in, c.w)
-			if len(got) != c.want {
-				t.Errorf("wrapFirst(%q,%d) = %d 行 %v, want %d", c.in, c.w, len(got), got, c.want)
+			got := truncateHead(c.in, c.w)
+			if got != c.want {
+				t.Errorf("truncateHead(%q,%d) = %q, want %q", c.in, c.w, got, c.want)
 			}
-			for _, line := range got {
-				if runeLen(line) > c.w {
-					t.Errorf("行宽度 %d 超过列宽 %d: %q", runeLen(line), c.w, line)
-				}
-			}
-			if len(got) > 1 && strings.Contains(got[0], "…") {
-				t.Errorf("第一行不应有省略号: %q", got[0])
+			if runeLen(got) > c.w {
+				t.Errorf("结果宽度 %d 超过上限 %d: %q", runeLen(got), c.w, got)
 			}
 		})
-	}
-}
-
-func TestWrapFirstEllipsisOnLastLine(t *testing.T) {
-	long := strings.Repeat("这是一个非常长的问题用于验证最后一行超出时省略号只在末尾出现 ", 5)
-	got := wrapFirst(long, 20)
-	if len(got) != 2 {
-		t.Fatalf("应两行，实际 %d 行: %v", len(got), got)
-	}
-	if strings.Contains(got[0], "…") {
-		t.Errorf("第一行不应有省略号: %q", got[0])
-	}
-	if !strings.Contains(got[1], "…") {
-		t.Errorf("第二行超宽应有省略号: %q", got[1])
 	}
 }
 
@@ -111,7 +92,7 @@ func TestWriteTableDynamicWidth(t *testing.T) {
 		{
 			AgentID:          model.AgentClaudeCode,
 			SessionID:        "abcdef",
-			FirstQuestion:    strings.Repeat("这是一个很长的问题用于验证表格输出中首次提问列会换行显示为两行且不超过列宽 ", 3),
+			FirstQuestion:    strings.Repeat("这是一个很长的问题用于验证表格输出中首次提问列单行截断显示 ", 5),
 			StartedAt:        timePtr(2026, 8, 5, 16, 41),
 			WorkingDirectory: "/home/alice/code/very-long-project-name",
 		},
@@ -125,14 +106,10 @@ func TestWriteTableDynamicWidth(t *testing.T) {
 	if !strings.Contains(out, "claude-code") {
 		t.Errorf("Agent 列应完整显示 claude-code，实际: %q", out)
 	}
-	// 长目录应完整显示
-	if !strings.Contains(out, "very-long-project-name") {
-		t.Errorf("CWD 应完整显示长目录")
-	}
-	// First Question 应产生两行
+	// First Question 应单行（数据行数 = 表头 + 分隔线 + 1 数据行）
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	if len(lines) < 4 {
-		t.Fatalf("应有两行输出（表头+分隔+内容2行），实际 %d 行", len(lines))
+	if len(lines) != 3 {
+		t.Fatalf("应 3 行输出（表头+分隔+1 数据行，单行显示），实际 %d 行", len(lines))
 	}
 }
 
