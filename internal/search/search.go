@@ -50,9 +50,32 @@ func Ensure(ctx context.Context, db *index.DB) error {
 	return nil
 }
 
-// Populate 全量重建 FTS 表内容。
+// ftsRow 是待写入 FTS 表的一行。
+type ftsRow struct {
+	rid                 int
+	sid, fq, wd, pn, gb string
+}
+
+// ftsInsert 在事务内批量写入 FTS 行。
+func ftsInsert(ctx context.Context, tx *sql.Tx, batch []ftsRow) error {
+	stmt, err := tx.PrepareContext(ctx,
+		`INSERT INTO session_fts(rowid, session_id, first_question, working_directory, project_name, git_branch)
+		 VALUES (?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stmt.Close() }()
+	for _, r := range batch {
+		if _, err := stmt.ExecContext(ctx, r.rid, r.sid, r.fq, r.wd, r.pn, r.gb); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Populate 增量同步 FTS 表：只插入缺失行，不重建。
 // 适用于 list/search 每次调用（O(新行) 而非 O(全表)）。
+// 单事务批量写入，避免逐条 autocommit 的 fsync 开销。
 func Populate(ctx context.Context, db *index.DB) error {
 	rows, err := db.SQL().QueryContext(ctx,
 		`SELECT s.rowid, s.session_id, s.first_question, s.working_directory, s.project_name, s.git_branch
@@ -61,26 +84,34 @@ func Populate(ctx context.Context, db *index.DB) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	var batch []ftsRow
 	for rows.Next() {
-		var (
-			rid        int
-			sid, fq    string
-			wd, pn, gb string
-		)
-		if err := rows.Scan(&rid, &sid, &fq, &wd, &pn, &gb); err != nil {
+		var r ftsRow
+		if err := rows.Scan(&r.rid, &r.sid, &r.fq, &r.wd, &r.pn, &r.gb); err != nil {
 			continue
 		}
-		if _, err := db.SQL().ExecContext(ctx,
-			`INSERT INTO session_fts(rowid, session_id, first_question, working_directory, project_name, git_branch)
-			 VALUES (?,?,?,?,?,?)`, rid, sid, fq, wd, pn, gb); err != nil {
-			return err
-		}
+		batch = append(batch, r)
 	}
-	return nil
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	if len(batch) == 0 {
+		return nil
+	}
+	tx, err := db.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := ftsInsert(ctx, tx, batch); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Rebuild 全量重建 FTS 表（用于 talea index --rebuild）。
+// 单事务批量写入。
 func Rebuild(ctx context.Context, db *index.DB) error {
 	if _, err := db.SQL().ExecContext(ctx, `DELETE FROM session_fts`); err != nil {
 		return err
@@ -92,22 +123,29 @@ func Rebuild(ctx context.Context, db *index.DB) error {
 		return err
 	}
 	defer rows.Close()
+	var batch []ftsRow
 	for rows.Next() {
-		var (
-			rid        int
-			sid, fq    string
-			wd, pn, gb string
-		)
-		if err := rows.Scan(&rid, &sid, &fq, &wd, &pn, &gb); err != nil {
+		var r ftsRow
+		if err := rows.Scan(&r.rid, &r.sid, &r.fq, &r.wd, &r.pn, &r.gb); err != nil {
 			continue
 		}
-		if _, err := db.SQL().ExecContext(ctx,
-			`INSERT INTO session_fts(rowid, session_id, first_question, working_directory, project_name, git_branch)
-			 VALUES (?,?,?,?,?,?)`, rid, sid, fq, wd, pn, gb); err != nil {
-			return err
-		}
+		batch = append(batch, r)
 	}
-	return nil
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(batch) == 0 {
+		return nil
+	}
+	tx, err := db.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := ftsInsert(ctx, tx, batch); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Search 执行全文搜索。
@@ -180,8 +218,11 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		       s.format_name, s.format_version,
 		       s.working_dir_exists, s.project_name, s.git_root, s.git_remote,
 		       s.activity_state,
+		       u.input_tokens, u.output_tokens, u.total_tokens, u.peak_context_tokens,
 		       %s AS score
 		FROM sessions s
+		LEFT JOIN session_usage u
+		       ON u.agent_instance_id = s.agent_instance_id AND u.session_id = s.session_id
 		WHERE %s
 		ORDER BY %s
 		LIMIT ?`,
@@ -205,6 +246,8 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 			duration             *int64
 			wdExists             int
 			activity             string
+			inTok, outTok        sql.NullInt64
+			totTok, peakTok      sql.NullInt64
 			score                float64
 		)
 		if err := rows.Scan(&s.AgentID, &s.AgentInstanceID, &s.SessionID,
@@ -215,7 +258,9 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 			&s.SourceSize, &s.SourceOffset,
 			&s.FormatName, &s.FormatVersion,
 			&wdExists, &s.ProjectName, &s.GitRoot, &s.GitRemote,
-			&activity, &score); err != nil {
+			&activity,
+			&inTok, &outTok, &totTok, &peakTok,
+			&score); err != nil {
 			continue
 		}
 		s.WorkingDirExists = wdExists != 0
@@ -236,21 +281,13 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 			d := time.Duration(*duration) * time.Second
 			s.Duration = &d
 		}
-		// 加载 Token 汇总
 		if s.HasTokenUsage {
-			var input, output, total, peak sql.NullInt64
-			err := db.SQL().QueryRowContext(ctx,
-				`SELECT input_tokens, output_tokens, total_tokens, peak_context_tokens
-				 FROM session_usage WHERE agent_instance_id=? AND session_id=?`,
-				s.AgentInstanceID, s.SessionID).Scan(&input, &output, &total, &peak)
-			if err == nil {
-				u := &model.TokenUsage{Source: model.UsageSourceAgentDatabase}
-				u.InputTokens = nn(input)
-				u.OutputTokens = nn(output)
-				u.TotalTokens = nn(total)
-				u.PeakContextTokens = nn(peak)
-				s.TokenUsage = u
-			}
+			u := &model.TokenUsage{Source: model.UsageSourceAgentDatabase}
+			u.InputTokens = nn(inTok)
+			u.OutputTokens = nn(outTok)
+			u.TotalTokens = nn(totTok)
+			u.PeakContextTokens = nn(peakTok)
+			s.TokenUsage = u
 		}
 		out = append(out, Result{Session: s, Score: -score}) // bm25 为负分，越小越相关
 	}

@@ -126,7 +126,7 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 	return out, nil
 }
 
-// indexTimelineEvents 索引会话的时间线事件。
+// indexTimelineEvents 索引会话的时间线事件（单事务批量写入）。
 func (ix *Indexer) indexTimelineEvents(ctx context.Context, sess *model.Session, ad adapters.Adapter) error {
 	prov, ok := adapters.As[adapters.UsageTimelineProvider](ad)
 	if !ok {
@@ -137,6 +137,17 @@ func (ix *Indexer) indexTimelineEvents(ctx context.Context, sess *model.Session,
 		return err
 	}
 	defer it.Close()
+	var batch []*model.UsageTimelineEvent
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if _, err := ix.DB.UpsertTimelineEvents(ctx, batch); err != nil {
+			return err
+		}
+		batch = batch[:0]
+		return nil
+	}
 	for {
 		e, ok, err := it.Next()
 		if err != nil {
@@ -145,11 +156,14 @@ func (ix *Indexer) indexTimelineEvents(ctx context.Context, sess *model.Session,
 		if !ok {
 			break
 		}
-		if _, err := ix.DB.UpsertTimelineEvent(ctx, e); err != nil {
-			return err
+		batch = append(batch, e)
+		if len(batch) >= 500 {
+			if err := flush(); err != nil {
+				return err
+			}
 		}
 	}
-	return nil
+	return flush()
 }
 
 // ResolveSubagentRelations 聚合子 Agent Token 到父会话。

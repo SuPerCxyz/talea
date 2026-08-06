@@ -395,6 +395,57 @@ func (db *DB) UpsertTimelineEvent(ctx context.Context, e *model.UsageTimelineEve
 	return n > 0, nil
 }
 
+// UpsertTimelineEvents 在单事务内批量写入时间线事件，source_identity 冲突时跳过。
+// 返回成功插入数。单个事件失败立即中止。
+func (db *DB) UpsertTimelineEvents(ctx context.Context, events []*model.UsageTimelineEvent) (int, error) {
+	if len(events) == 0 {
+		return 0, nil
+	}
+	tx, err := db.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT OR IGNORE INTO usage_timeline_events (
+			agent_instance_id, session_id, event_id, event_type, timestamp, sequence,
+			duration_ms, request_id, response_id, message_id, parent_message_id,
+			tool_call_id, subagent_id, model, provider, input_tokens, output_tokens,
+			total_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
+			tool_tokens, context_before, context_after, context_limit,
+			cumulative_input, cumulative_output, cumulative_total,
+			user_prompt_preview, tool_name, file_path, command_preview,
+			value_mode, usage_source, completeness, is_estimated,
+			source_identity, raw_fields_json
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = stmt.Close() }()
+	var n int
+	for _, e := range events {
+		raw, _ := json.Marshal(e.RawFields)
+		res, err := stmt.ExecContext(ctx,
+			e.AgentInstanceID, e.SessionID, e.EventID, string(e.EventType), toEpoch(e.Timestamp), e.Sequence,
+			durMillis(e.Duration), e.RequestID, e.ResponseID, e.MessageID, e.ParentMessageID,
+			e.ToolCallID, e.SubagentID, e.Model, e.Provider,
+			ptrOrNil(e.InputTokens), ptrOrNil(e.OutputTokens), ptrOrNil(e.TotalTokens),
+			ptrOrNil(e.CacheReadTokens), ptrOrNil(e.CacheWriteTokens), ptrOrNil(e.ReasoningTokens),
+			ptrOrNil(e.ToolTokens), ptrOrNil(e.ContextBefore), ptrOrNil(e.ContextAfter), ptrOrNil(e.ContextLimit),
+			ptrOrNil(e.CumulativeInput), ptrOrNil(e.CumulativeOutput), ptrOrNil(e.CumulativeTotal),
+			e.UserPromptPreview, e.ToolName, e.FilePath, e.CommandPreview,
+			string(e.ValueMode), string(e.Source), string(e.Completeness), boolInt(e.IsEstimated),
+			e.SourceIdentity, raw)
+		if err != nil {
+			return n, err
+		}
+		if cnt, _ := res.RowsAffected(); cnt > 0 {
+			n++
+		}
+	}
+	return n, tx.Commit()
+}
+
 func ptrOrNil(p *int64) any {
 	if p == nil {
 		return nil

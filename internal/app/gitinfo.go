@@ -2,28 +2,21 @@ package app
 
 import (
 	"os/exec"
-	"path/filepath"
 	"strings"
-
-	"github.com/talea/talea/internal/model"
 )
 
-// fillGitInfo 读取工作目录的 Git 信息，失败不影响会话显示。
-func fillGitInfo(s *model.Session) {
-	root := gitRoot(s.WorkingDirectory)
+// fillGitInfoDir 读取工作目录的 Git 信息，失败时返回零值，不影响会话显示。
+func fillGitInfoDir(cwd string) (g struct {
+	root, branch, remote string
+}) {
+	root := gitRoot(cwd)
 	if root == "" {
-		return
+		return g
 	}
-	s.GitRoot = root
-	if name := filepath.Base(root); name != "" {
-		s.ProjectName = name
-	}
-	if s.GitBranch == "" {
-		s.GitBranch = gitBranch(root)
-	}
-	if s.GitRemote == "" {
-		s.GitRemote = gitRemote(root)
-	}
+	g.root = root
+	g.branch = gitBranch(root)
+	g.remote = gitRemote(root)
+	return g
 }
 
 func gitRoot(cwd string) string {

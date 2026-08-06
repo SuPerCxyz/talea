@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -129,17 +130,40 @@ func (a *App) DiscoverSessions(ctx context.Context) ([]SessionResult, error) {
 }
 
 // ResolveWorkingDirs 补齐目录存在性并读取 Git 信息。
+// 相同工作目录只 stat / git 一次，结果按会话缺省字段回填，避免 N 次外部命令。
 func (a *App) ResolveWorkingDirs(ctx context.Context, sessions []*model.Session) {
+	type gitInfo struct {
+		root, branch, remote string
+	}
+	cache := make(map[string]gitInfo)
 	for _, s := range sessions {
 		if s.WorkingDirectory == "" {
 			continue
 		}
-		s.WorkingDirExists = dirExists(s.WorkingDirectory)
+		dir := s.WorkingDirectory
+		s.WorkingDirExists = dirExists(dir)
 		if !s.WorkingDirExists {
 			continue
 		}
-		if s.GitBranch == "" || s.GitRoot == "" {
-			fillGitInfo(s)
+		if s.GitBranch != "" && s.GitRoot != "" {
+			continue
+		}
+		g, ok := cache[dir]
+		if !ok {
+			g = fillGitInfoDir(dir)
+			cache[dir] = g
+		}
+		if s.GitRoot == "" {
+			s.GitRoot = g.root
+		}
+		if s.GitBranch == "" {
+			s.GitBranch = g.branch
+		}
+		if s.GitRemote == "" {
+			s.GitRemote = g.remote
+		}
+		if s.ProjectName == "" && g.root != "" {
+			s.ProjectName = filepath.Base(g.root)
 		}
 	}
 }
