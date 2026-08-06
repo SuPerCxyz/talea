@@ -148,3 +148,57 @@ func mustList(t *testing.T, ctx context.Context, db *index.DB) []timeline.Event 
 	}
 	return evs
 }
+
+func TestModelSwitchCacheDrop(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.Migrate(ctx)
+	base := time.Now()
+	// 模型 A 缓存 10000，切到模型 B 缓存 100
+	db.UpsertTimelineEvent(ctx, &model.UsageTimelineEvent{
+		AgentInstanceID: "i", SessionID: "s", EventType: model.UsageEventRequest,
+		Timestamp: &base, Sequence: 0, Model: "model-a",
+		CacheReadTokens: int64p(10000), SourceIdentity: "t-0",
+	})
+	t2 := base.Add(time.Second)
+	db.UpsertTimelineEvent(ctx, &model.UsageTimelineEvent{
+		AgentInstanceID: "i", SessionID: "s", EventType: model.UsageEventRequest,
+		Timestamp: &t2, Sequence: 1, Model: "model-b",
+		CacheReadTokens: int64p(100), SourceIdentity: "t-1",
+	})
+	evs, _ := timeline.List(ctx, db, timeline.Query{AgentInstanceID: "i", SessionID: "s"})
+	if !modelSwitchCacheDrop(evs) {
+		t.Fatal("expected cache drop on model switch")
+	}
+}
+
+func TestLargeContextJump(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.Migrate(ctx)
+	base := time.Now()
+	// 上下文 10k -> 200k（跳升）
+	db.UpsertTimelineEvent(ctx, &model.UsageTimelineEvent{
+		AgentInstanceID: "i", SessionID: "s", EventType: model.UsageEventRequest,
+		Timestamp: &base, Sequence: 0, ContextAfter: int64p(10000), SourceIdentity: "t-0",
+	})
+	t2 := base.Add(time.Second)
+	db.UpsertTimelineEvent(ctx, &model.UsageTimelineEvent{
+		AgentInstanceID: "i", SessionID: "s", EventType: model.UsageEventRequest,
+		Timestamp: &t2, Sequence: 1, ContextAfter: int64p(200000), SourceIdentity: "t-1",
+	})
+	evs, _ := timeline.List(ctx, db, timeline.Query{AgentInstanceID: "i", SessionID: "s"})
+	if n := largeContextJump(evs); n != 1 {
+		t.Fatalf("jumps=%d, want 1", n)
+	}
+}
+
+func int64p(v int64) *int64 { return &v }

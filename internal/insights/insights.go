@@ -3,6 +3,7 @@ package insights
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"time"
@@ -87,7 +88,114 @@ func Generate(ctx context.Context, db *index.DB, instanceID, sessionID string) (
 		}
 	}
 
+	// 7. 模型切换后缓存失效
+	if modelSwitchCacheDrop(events) {
+		rep.Insights = append(rep.Insights, Insight{
+			Type: "model-switch",
+			Text: "检测到模型切换后缓存读取下降，可能触发缓存失效",
+		})
+	}
+
+	// 8. Token 数据不完整
+	if incomplete(events) {
+		rep.Insights = append(rep.Insights, Insight{
+			Type: "incomplete",
+			Text: "部分请求缺失 Token 数据，累计统计可能不完整",
+		})
+	}
+
+	// 9. 上下文显著跳升（可能为会话恢复或大量注入）
+	if jumps := largeContextJump(events); jumps > 0 {
+		rep.Insights = append(rep.Insights, Insight{
+			Type: "context-jump",
+			Text: fmt.Sprintf("检测到 %d 次上下文大幅跳升（可能为会话恢复或大量内容注入）", jumps),
+		})
+	}
+
+	// 10. 单个子 Agent 使用量异常（超过父会话 30%）
+	if sub := abnormalSubagent(ctx, db, instanceID, sessionID); sub {
+		rep.Insights = append(rep.Insights, Insight{
+			Type: "subagent-abnormal",
+			Text: "检测到子 Agent Token 消耗占比异常偏高",
+		})
+	}
+
 	return rep, nil
+}
+
+// abnormalSubagent 检测直接子会话总 Token 是否占父会话异常比例（>30%）。
+func abnormalSubagent(ctx context.Context, db *index.DB, instanceID, sessionID string) bool {
+	var childTotal, parentTotal sql.NullInt64
+	err := db.SQL().QueryRowContext(ctx,
+		`SELECT COALESCE(direct_child_tokens,0), COALESCE(total_tokens,0)
+		 FROM session_usage WHERE agent_instance_id=? AND session_id=?`,
+		instanceID, sessionID).Scan(&childTotal, &parentTotal)
+	if err != nil {
+		return false
+	}
+	if childTotal.Int64 <= 0 || parentTotal.Int64 <= 0 {
+		return false
+	}
+	return float64(childTotal.Int64)/float64(parentTotal.Int64) > 0.3
+}
+
+// modelSwitchCacheDrop 检测模型切换后缓存读取是否骤降。
+func modelSwitchCacheDrop(events []timeline.Event) bool {
+	var (
+		prevModel string
+		prevCache int64
+		seen      bool
+	)
+	for _, e := range events {
+		if e.EventType != "request" {
+			continue
+		}
+		cache := int64(0)
+		if e.CacheReadTokens != nil {
+			cache = *e.CacheReadTokens
+		}
+		if seen && e.Model != "" && prevModel != e.Model && prevCache > 0 && cache < prevCache/10 {
+			return true
+		}
+		if e.Model != "" {
+			prevModel = e.Model
+		}
+		prevCache = cache
+		seen = true
+	}
+	return false
+}
+
+// incomplete 检测存在缺失 Token 数据的请求。
+func incomplete(events []timeline.Event) bool {
+	requests := 0
+	missing := 0
+	for _, e := range events {
+		if e.EventType != "request" {
+			continue
+		}
+		requests++
+		if e.TotalTokens == nil && e.InputTokens == nil && e.OutputTokens == nil {
+			missing++
+		}
+	}
+	return requests > 5 && missing > 0
+}
+
+// largeContextJump 检测上下文在单次请求间大幅跳升（>2 倍且超过 50k）。
+func largeContextJump(events []timeline.Event) int {
+	var prev int64
+	jumps := 0
+	for _, e := range events {
+		if e.EventType != "request" || e.ContextAfter == nil {
+			continue
+		}
+		if prev > 0 && *e.ContextAfter > prev*2 && *e.ContextAfter-prev > 50_000 {
+			jumps++
+		}
+		prev = *e.ContextAfter
+	}
+	return jumps
 }
 
 // FileReadStat 记录同一文件的读取次数。
