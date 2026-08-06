@@ -87,6 +87,74 @@ func TestSearchByIDAndFTS(t *testing.T) {
 	}
 }
 
+// TestByIDPrefix 验证按 session_id 前缀查找（不经 FTS，短前缀可用），
+// 以及 agent 过滤与不存在的场景。
+func TestByIDPrefix(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	insertSession(t, db, mkSession("ses_0a037a156ffeHPmbe15W", "q1", "/home/alice", "opencode"))
+	insertSession(t, db, mkSession("ses_0a037a156ffeHPmbe15X", "q2", "/home/alice", "opencode"))
+	insertSession(t, db, mkSession("abc-123", "q3", "/home/alice/code", "claude-code"))
+	if err := Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	// 前缀唯一
+	res, err := ByIDPrefix(ctx, db, "ses_0a037a156ffeHPmbe15W", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Session.SessionID != "ses_0a037a156ffeHPmbe15W" {
+		t.Fatalf("unique prefix: got %d results", len(res))
+	}
+
+	// 前缀多候选 + agent 过滤
+	res, err = ByIDPrefix(ctx, db, "ses_0a037a156ffeHPmbe15", "opencode", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("prefix+agent: got %d results", len(res))
+	}
+
+	// 前缀不存在
+	res, err = ByIDPrefix(ctx, db, "nope", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 0 {
+		t.Fatalf("missing prefix: got %d results", len(res))
+	}
+}
+
+// TestSearchTermAndAgent 回归：Term（FTS）与 Agent 过滤组合时参数占位符不得错位，
+// 否则 agent 值会传给 EXISTS 的 MATCH、ftsTerm 传给 agent_id 比较导致 0 结果。
+func TestSearchTermAndAgent(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	insertSession(t, db, mkSession("ses_0a037a156ffeHPmbe15W", "multipath 残留", "/home/alice", "opencode"))
+	insertSession(t, db, mkSession("abc-123", "multipath 清理", "/home/alice/code/cinder", "claude-code"))
+	if err := Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Search(ctx, db, Query{Term: "ses_0a037a156ffeHPmbe15W", Agent: "opencode", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Session.SessionID != "ses_0a037a156ffeHPmbe15W" {
+		t.Fatalf("term+agent: got %d results", len(res))
+	}
+
+	res, err = Search(ctx, db, Query{Term: "multipath", Agent: "claude-code", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Session.AgentID != "claude-code" {
+		t.Fatalf("keyword+agent: got %d results", len(res))
+	}
+}
+
 func TestSearchFilters(t *testing.T) {
 	ctx := context.Background()
 	db := newDB(t)

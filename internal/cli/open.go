@@ -7,13 +7,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/talea/talea/internal/i18n"
-
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/cli/output"
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/resume"
@@ -167,7 +167,8 @@ func (e exitError) Error() string {
 	return fmt.Sprintf(i18n.Tr("exit code %d", "退出码 %d"), e.code)
 }
 
-// findSession 从索引定位会话（支持前缀匹配）。
+// findSession 从索引定位会话。id 可为完整或前缀 session id；
+// agent 非空时作为过滤条件。匹配策略：精确 → 唯一前缀；多前缀候选报歧义。
 func findSession(ctx context.Context, a *app.App, id, agent string) (*model.Session, error) {
 	db, err := index.Open(a.Paths.DBPath)
 	if err != nil {
@@ -180,10 +181,11 @@ func findSession(ctx context.Context, a *app.App, id, agent string) (*model.Sess
 	if err := autoIndex(ctx, a, db); err != nil {
 		return nil, err
 	}
-	results, err := search.Search(ctx, db, search.Query{Term: id, Agent: agent, Limit: 50})
+	results, err := search.ByIDPrefix(ctx, db, id, agent, 100)
 	if err != nil {
 		return nil, err
 	}
+	// 精确匹配
 	for i := range results {
 		s := results[i].Session
 		if s.SessionID == id {
@@ -191,15 +193,30 @@ func findSession(ctx context.Context, a *app.App, id, agent string) (*model.Sess
 			return &s, nil
 		}
 	}
-	// 前缀匹配
+	// 前缀匹配：收集全部候选
+	var matches []*model.Session
 	for i := range results {
 		s := results[i].Session
 		if strings.HasPrefix(s.SessionID, id) {
-			s.WorkingDirExists = dirExists(s.WorkingDirectory)
-			return &s, nil
+			ss := s
+			ss.WorkingDirExists = dirExists(s.WorkingDirectory)
+			matches = append(matches, &ss)
 		}
 	}
-	return nil, exitError{code: ExitNotFound, msg: i18n.Trf("session %q not found", "未找到会话 %q", id)}
+	switch len(matches) {
+	case 0:
+		return nil, exitError{code: ExitNotFound, msg: i18n.Trf("session %q not found", "未找到会话 %q", id)}
+	case 1:
+		return matches[0], nil
+	default:
+		var b strings.Builder
+		b.WriteString(i18n.Trf("session id %q is ambiguous, matching:", "会话 ID %q 有多个匹配：", id))
+		for _, m := range matches {
+			fmt.Fprintf(&b, "\n  %s  %s", output.DisplayAgent(m.AgentID), m.SessionID)
+		}
+		b.WriteString(i18n.Tr("\ntry a longer prefix", "\n请使用更完整的前缀"))
+		return nil, exitError{code: ExitNotFound, msg: b.String()}
+	}
 }
 
 func displayNameOf(ad adapters.Adapter) string {

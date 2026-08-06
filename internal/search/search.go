@@ -227,17 +227,69 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		ORDER BY %s
 		LIMIT ?`,
 		scoreExpr, strings.Join(where, " AND "), orderBy)
+	// scoreExpr 的 MATCH ? 在 SELECT 中最先出现，必须置于参数最前；
+	// 否则后续 where 参数（如 agent 过滤）会与 EXISTS 的 MATCH ? 错位。
+	queryArgs := make([]any, 0, len(args)+2)
 	if hasTerm {
-		args = append(args, ftsTerm(q.Term))
+		queryArgs = append(queryArgs, ftsTerm(q.Term))
 	}
-	args = append(args, limit)
+	queryArgs = append(queryArgs, args...)
+	queryArgs = append(queryArgs, limit)
 
-	rows, err := db.SQL().QueryContext(ctx, query, args...)
+	rows, err := db.SQL().QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	return scanSessions(rows)
+}
+
+// ByIDPrefix 按 session_id 前缀精确查找会话（不经 FTS，前缀短于 3 字符也能匹配）。
+// agent 非空时过滤 agent_id；limit 为返回上限。
+func ByIDPrefix(ctx context.Context, db *index.DB, prefix, agent string, limit int) ([]Result, error) {
+	if prefix == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	where := `s.session_id LIKE ?`
+	args := []any{prefix + "%"}
+	if agent != "" {
+		where += ` AND s.agent_id = ?`
+		args = append(args, agent)
+	}
+	query := fmt.Sprintf(`
+		SELECT s.agent_id, s.agent_instance_id, s.session_id,
+		       s.first_question, s.started_at, s.ended_at,
+		       s.last_activity_at, s.duration_seconds,
+		       s.working_directory, s.git_branch,
+		       s.is_subagent, s.has_token_usage,
+		       s.source_path, s.source_id, s.source_mtime,
+		       s.source_size, s.source_offset,
+		       s.format_name, s.format_version,
+		       s.working_dir_exists, s.project_name, s.git_root, s.git_remote,
+		       s.activity_state,
+		       u.input_tokens, u.output_tokens, u.total_tokens, u.peak_context_tokens,
+		       0.0 AS score
+		FROM sessions s
+		LEFT JOIN session_usage u
+		       ON u.agent_instance_id = s.agent_instance_id AND u.session_id = s.session_id
+		WHERE %s
+		ORDER BY s.last_activity_at DESC
+		LIMIT ?`, where)
+	args = append(args, limit)
+	rows, err := db.SQL().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSessions(rows)
+}
+
+// scanSessions 将查询行扫描为 Session 结果（含 Token 汇总）。
+func scanSessions(rows *sql.Rows) ([]Result, error) {
 	var out []Result
 	for rows.Next() {
 		var (
@@ -291,7 +343,7 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		}
 		out = append(out, Result{Session: s, Score: -score}) // bm25 为负分，越小越相关
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // List 列出会话（与 Search 共用，无关键词时）。
