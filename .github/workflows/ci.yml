@@ -43,8 +43,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - run: GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -o bin/talea-${{ matrix.arch }} ./cmd/talea
+      - run: |
+          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -o bin/talea ./cmd/talea
+          tar -czf talea-linux-${{ matrix.arch }}.tar.gz -C bin talea
+      - run: sha256sum talea-linux-${{ matrix.arch }}.tar.gz >> checksums.txt
       - uses: actions/upload-artifact@v4
         with:
           name: talea-linux-${{ matrix.arch }}
-          path: bin/talea-${{ matrix.arch }}
+          path: talea-linux-${{ matrix.arch }}.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: checksums.txt
