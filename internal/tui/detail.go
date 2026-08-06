@@ -9,12 +9,10 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
 	"github.com/talea/talea/internal/chart"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
-	"github.com/talea/talea/internal/preview"
 	"github.com/talea/talea/internal/timeline"
 	"github.com/talea/talea/internal/usage"
 )
@@ -44,24 +42,16 @@ func (d *detailModel) render() string {
 	}
 	var sb strings.Builder
 	sb.WriteString(d.renderDetail())
-	sb.WriteString("\n\n" + titleStyle.Render("Token 时间线") + "\n")
-	sb.WriteString(sectionOr(d.renderTimeline()))
 	sb.WriteString("\n\n" + titleStyle.Render("上下文窗口曲线") + "\n")
 	sb.WriteString(sectionOr(d.renderContext()))
 	sb.WriteString("\n\n" + titleStyle.Render("按模型汇总") + "\n")
 	sb.WriteString(sectionOr(d.renderModel()))
-	sb.WriteString("\n\n" + titleStyle.Render("用户轮次") + "\n")
-	sb.WriteString(sectionOr(d.renderTurns()))
 	sb.WriteString("\n\n" + titleStyle.Render("Token 图表") + "\n")
 	sb.WriteString(sectionOr(d.renderCharts()))
 	sb.WriteString("\n\n" + titleStyle.Render("Token 汇总") + "\n")
 	sb.WriteString(sectionOr(d.renderUsageSummary()))
 	sb.WriteString("\n\n" + titleStyle.Render("子 Agent 会话") + "\n")
 	sb.WriteString(sectionOr(d.renderSubagents()))
-	if d.app != nil {
-		sb.WriteString("\n\n" + titleStyle.Render("对话预览") + "\n")
-		sb.WriteString(sectionOr(d.renderPreview()))
-	}
 	sb.WriteString("\n\n" + labelStyle.Render("按键：o 恢复  esc/q 返回列表  ↑/↓ 滚动"))
 	return sb.String()
 }
@@ -84,36 +74,7 @@ func sectionOr(s string) string {
 	return s + "\n"
 }
 
-// renderTimeline 渲染请求级时间线。
-func (d *detailModel) renderTimeline() string {
-	if d.db == nil {
-		return "数据库不可用"
-	}
-	events, err := timeline.List(d.ctx, d.db, timeline.Query{
-		AgentInstanceID: d.sess.AgentInstanceID,
-		SessionID:       d.sess.SessionID,
-		Limit:           200,
-	})
-	if err != nil {
-		return "加载时间线失败：" + err.Error()
-	}
-	if len(events) == 0 {
-		return "该会话没有 Token 时间线数据"
-	}
-	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("Token 时间线") + "\n\n")
-	for _, e := range events {
-		ts := ""
-		if e.Timestamp != nil {
-			ts = e.Timestamp.Format("15:04:05")
-		}
-		sb.WriteString(fmt.Sprintf("%s  %-18s  %s\n", ts, string(e.EventType), timelineDesc(e)))
-	}
-	// 聚合展示，无需 tab 返回
-	return sb.String()
-}
-
-// renderContext 渲染上下文窗口曲线。
+// renderContext 渲染上下文窗口曲线（ASCII 曲线图）。
 func (d *detailModel) renderContext() string {
 	if d.db == nil {
 		return "数据库不可用"
@@ -127,13 +88,17 @@ func (d *detailModel) renderContext() string {
 	}
 	comps, _ := timeline.DetectCompactions(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID)
 	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("上下文窗口曲线") + "\n\n")
-	sb.WriteString(fmt.Sprintf("%-10s  %-10s  %-12s\n", "时间", "上下文", "变化"))
-	for _, p := range pts {
-		sb.WriteString(fmt.Sprintf("%-10s  %-10s  %+s\n",
-			time.Unix(p.Timestamp, 0).Format("15:04:05"),
-			humanNum(p.Context), signedHuman(p.Change)))
+	sb.WriteString(labelStyle.Render("上下文窗口（Token）：") + "\n")
+	vals := make([]float64, len(pts))
+	labels := make([]string, len(pts))
+	for i, p := range pts {
+		vals[i] = float64(p.Context)
+		labels[i] = time.Unix(p.Timestamp, 0).Format("15:04")
 	}
+	sb.WriteString(chart.Line(vals, 50) + "\n")
+	// 起点/峰值/终点标注
+	sb.WriteString(fmt.Sprintf("起点 %s  峰值 %s  终点 %s\n",
+		humanNum(pts[0].Context), humanNum(int64(peakVal(vals))), humanNum(pts[len(pts)-1].Context)))
 	if len(comps) > 0 {
 		sb.WriteString("\n上下文压缩：\n")
 		for _, c := range comps {
@@ -146,6 +111,17 @@ func (d *detailModel) renderContext() string {
 	}
 	// 聚合展示，无需 tab 返回
 	return sb.String()
+}
+
+// peakVal 返回浮点切片最大值。
+func peakVal(v []float64) float64 {
+	m := v[0]
+	for _, x := range v[1:] {
+		if x > m {
+			m = x
+		}
+	}
+	return m
 }
 
 // renderModel 渲染模型汇总。
@@ -171,60 +147,24 @@ func (d *detailModel) renderModel() string {
 	return sb.String()
 }
 
-// renderPreview 渲染对话预览（按需加载，ANSI 清理 + 脱敏）。
-func (d *detailModel) renderPreview() string {
-	ad, ok := d.app.Registry.Get(d.sess.AgentID)
-	if !ok {
-		return "会话格式不支持"
-	}
-	msgs, err := preview.Load(d.ctx, ad, *d.sess, preview.Options{
-		Limit:  60,
-		Redact: d.app.Config.Privacy.RedactSecretsInPreview,
-	})
-	if err != nil {
-		return "加载预览失败：" + err.Error()
-	}
-	if len(msgs) == 0 {
-		return "该会话没有可预览的消息"
-	}
-	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("对话预览") + "\n\n")
-	for _, m := range msgs {
-		roleStyle := valueStyle
-		if m.Role == "用户" {
-			roleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("120"))
-		}
-		sb.WriteString(fmt.Sprintf("[%s] %s\n", roleStyle.Render(m.Role), labelStyle.Render(m.Timestamp)))
-		content := strings.TrimSpace(m.Content)
-		if content != "" {
-			sb.WriteString(content + "\n")
-		}
-		sb.WriteString("\n")
-	}
-	// 聚合展示，无需 tab 返回
-	return sb.String()
-}
-
-// renderTurns 渲染用户轮次聚合。
-func (d *detailModel) renderTurns() string {
+// renderTurnsTable 渲染用户轮次表格（无标题，供聚合/详情嵌入）。
+func (d *detailModel) renderTurnsTable() string {
 	if d.db == nil {
-		return "数据库不可用"
+		return "数据库不可用\n"
 	}
 	turns, err := timeline.GroupByTurns(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID)
 	if err != nil {
-		return "加载轮次失败：" + err.Error()
+		return "加载轮次失败：" + err.Error() + "\n"
 	}
 	if len(turns) == 0 {
-		return "该会话没有可聚合的轮次"
+		return "该会话没有可聚合的轮次\n"
 	}
 	var sb strings.Builder
-	sb.WriteString(titleStyle.Render("用户轮次") + "\n\n")
-	sb.WriteString(fmt.Sprintf("%-5s  %-30s  %-6s  %-10s\n", "轮次", "提问", "请求", "Token"))
+	sb.WriteString(fmt.Sprintf("%-5s  %-40s  %-6s  %-10s\n", "轮次", "提问", "请求", "Token"))
 	for _, t := range turns {
-		sb.WriteString(fmt.Sprintf("%-5d  %-30s  %-6d  %-10s\n",
-			t.Index, truncRunes(t.Prompt, 28), t.Requests, humanNum(t.Total)))
+		sb.WriteString(fmt.Sprintf("%-5d  %-40s  %-6d  %-10s\n",
+			t.Index, truncRunes(t.Prompt, 38), t.Requests, humanNum(t.Total)))
 	}
-	// 聚合展示，无需 tab 返回
 	return sb.String()
 }
 
@@ -347,27 +287,6 @@ func truncRunes(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
-func timelineDesc(e timeline.Event) string {
-	var parts []string
-	if e.TotalTokens != nil {
-		parts = append(parts, fmt.Sprintf("总计 %s", humanNum(*e.TotalTokens)))
-	}
-	if e.InputTokens != nil {
-		parts = append(parts, fmt.Sprintf("输入 %s", humanNum(*e.InputTokens)))
-	}
-	if e.OutputTokens != nil {
-		parts = append(parts, fmt.Sprintf("输出 %s", humanNum(*e.OutputTokens)))
-	}
-	return strings.Join(parts, "  ")
-}
-
-func signedHuman(n int64) string {
-	if n >= 0 {
-		return "+" + humanNum(n)
-	}
-	return "-" + humanNum(-n)
-}
-
 // renderDetail 渲染会话详情文本。
 func (d *detailModel) renderDetail() string {
 	s := d.sess
@@ -385,6 +304,10 @@ func (d *detailModel) renderDetail() string {
 	if lineCount(q) > 5 {
 		sb.WriteString(fmt.Sprintf("%s\n", dimStyle.Render(fmt.Sprintf("（共 %d 行，向下滚动查看完整）", lineCount(q)))))
 	}
+
+	// 用户轮次与第一次提问同区展示
+	sb.WriteString("\n" + labelStyle.Render("用户轮次：") + "\n")
+	sb.WriteString(d.renderTurnsTable())
 
 	if s.StartedAt != nil {
 		sb.WriteString(fmt.Sprintf("\n%s %s\n", labelStyle.Render("开始时间："), valueStyle.Render(s.StartedAt.Format("2006-01-02 15:04:05"))))
@@ -432,7 +355,6 @@ func (d *detailModel) renderDetail() string {
 		sb.WriteString("\n当前 Agent 会话格式未提供 Token 使用数据\n")
 	}
 
-	sb.WriteString("\n\n" + labelStyle.Render("按键：t 时间线  c 上下文  m 模型  r 轮次  g 图表  u 汇总  a 子Agent  p 预览  o 恢复  esc 返回  q 退出"))
 	return sb.String()
 }
 
@@ -452,10 +374,6 @@ func (d *detailModel) View() string {
 	d.view.SetContent(d.render())
 	return d.view.View()
 }
-
-var _ = context.Background
-var _ = adapters.Command{}
-var _ = app.App{}
 
 func firstQuestionOrFallback(s *model.Session) string {
 	if s.FirstQuestion != "" {

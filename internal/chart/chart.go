@@ -39,15 +39,27 @@ func Bar(values []float64, labels []string, height int) string {
 		}
 		sb.WriteString("\n")
 	}
-	// 数值刻度
-	for _, v := range values {
+	// 数值刻度（柱多时降采样）
+	step := 1
+	for len(values)/step > 12 {
+		step++
+	}
+	for i, v := range values {
+		if i%step != 0 {
+			sb.WriteString("  ")
+			continue
+		}
 		sb.WriteString(fmt.Sprintf("%s ", compact(v)))
 	}
 	sb.WriteString("\n")
-	// 标签
+	// 标签（柱多时降采样，保留完整 HH:MM）
 	if len(labels) > 0 {
-		for _, l := range labels {
-			sb.WriteString(trunc(l, 3) + " ")
+		for i, l := range labels {
+			if i%step != 0 {
+				sb.WriteString("   ")
+				continue
+			}
+			sb.WriteString(trunc(l, 5) + " ")
 		}
 		sb.WriteString("\n")
 	}
