@@ -26,7 +26,7 @@ func TestGoRow(t *testing.T) {
 				WorkingDirectory: "/home/user/proj",
 				TokenUsage:       &model.TokenUsage{TotalTokens: int64p(1400000)},
 			},
-			want: []string{"claude-code", "08-05 16:41", "1.40M", "~/proj", "修复登录 bug"},
+			want: []string{"claude-code", "abc123", "08-05 16:41", "1.40M", "~/proj", "修复登录 bug"},
 		},
 		{
 			name: "empty optional",
@@ -34,7 +34,7 @@ func TestGoRow(t *testing.T) {
 				AgentID:   model.AgentOpenCode,
 				SessionID: "ses_xyz",
 			},
-			want: []string{"opencode", "", "未知", "", ""},
+			want: []string{"opencode", "ses_xyz", "", "未知", "", ""},
 		},
 	}
 	for _, c := range cases {

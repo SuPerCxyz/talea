@@ -105,7 +105,7 @@ func goSelect(ctx context.Context, a *app.App) error {
 	a.SortSessions(sessions)
 
 	m := newGoModel(ctx, a, sessions)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		return err
 	}
@@ -116,6 +116,7 @@ func goSelect(ctx context.Context, a *app.App) error {
 func goRow(s *model.Session) table.Row {
 	return table.Row{
 		string(s.AgentID),
+		s.SessionID,
 		goTime(s.StartedAt),
 		output.FormatTokens(s.TokenUsage),
 		shortHome(s.WorkingDirectory),
@@ -126,10 +127,11 @@ func goRow(s *model.Session) table.Row {
 func newGoModel(ctx context.Context, a *app.App, sessions []*model.Session) *goModel {
 	columns := []table.Column{
 		{Title: "Agent", Width: 12},
+		{Title: "Session ID", Width: 30},
 		{Title: "Time", Width: 12},
 		{Title: "Tokens", Width: 9},
 		{Title: "CWD", Width: 24},
-		{Title: "First Question", Width: 40},
+		{Title: "First Question", Width: 80},
 	}
 	rows := make([]table.Row, 0, len(sessions))
 	for _, s := range sessions {

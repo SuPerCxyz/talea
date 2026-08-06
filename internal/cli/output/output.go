@@ -223,17 +223,17 @@ func writeCSV(w io.Writer, views []SessionView) error {
 }
 
 func writeMarkdown(w io.Writer, views []SessionView) error {
-	fmt.Fprintf(w, "| Agent | 开始 | 结束 | Time | Token | 目录 | 首次提问 |\n")
-	fmt.Fprintf(w, "|-------|------|------|------|-------|------|---------|\n")
+	fmt.Fprintf(w, "| Agent | Session ID | 开始 | 结束 | Time | Token | 目录 | 首次提问 |\n")
+	fmt.Fprintf(w, "|-------|------------|------|------|------|-------|------|---------|\n")
 	for _, v := range views {
-		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s |\n",
-			v.Agent, v.StartedAt, v.EndedAt, v.Duration, v.Tokens, shortDir(v.WorkingDirectory), oneLine(v.FirstQuestion))
+		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			v.Agent, v.SessionID, v.StartedAt, v.EndedAt, v.Duration, v.Tokens, shortDir(v.WorkingDirectory), oneLine(v.FirstQuestion))
 	}
 	return nil
 }
 
 func writeTable(w io.Writer, views []SessionView) error {
-	headers := []string{"Agent", "Start", "End", "Time", "Tokens", "CWD", "First Question"}
+	headers := []string{"Agent", "Session ID", "Start", "End", "Time", "Tokens", "CWD", "First Question"}
 	n := len(headers)
 	widths := make([]int, n)
 	for i, h := range headers {
@@ -243,7 +243,7 @@ func writeTable(w io.Writer, views []SessionView) error {
 	maxFirst := 0
 	rows := make([][]string, len(views))
 	for i, v := range views {
-		row := []string{v.Agent, v.StartedAt, v.EndedAt, v.Duration, v.Tokens,
+		row := []string{v.Agent, v.SessionID, v.StartedAt, v.EndedAt, v.Duration, v.Tokens,
 			shortDir(v.WorkingDirectory), oneLine(v.FirstQuestion)}
 		rows[i] = row
 		for j := 0; j < n-1; j++ {
@@ -255,10 +255,10 @@ func writeTable(w io.Writer, views []SessionView) error {
 			maxFirst = w
 		}
 	}
-	// First Question 允许两行：宽度取内容与固定上限的较小值（上限 80）
+	// First Question 允许两行：宽度取内容与固定上限的较小值（上限 100）
 	firstW := maxFirst
-	if firstW > 80 {
-		firstW = 80
+	if firstW > 100 {
+		firstW = 100
 	}
 	widths[n-1] = firstW
 
