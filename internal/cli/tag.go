@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/tags"
 )
@@ -14,8 +15,8 @@ import (
 func newTagCmd() *cobra.Command {
 	var agentFlag string
 	cmd := &cobra.Command{
-		Use:   "tag <session-id> [标签...]",
-		Short: "会话标签 / 收藏 / 备注",
+		Use:   "tag <session-id> [tags...]",
+		Short: i18n.Tr("session tags / favorite / note", "会话标签 / 收藏 / 备注"),
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -40,7 +41,7 @@ func newTagCmd() *cobra.Command {
 				if err := tags.SetTags(ctx, db, sess.AgentInstanceID, sess.SessionID, strings.Join(args[1:], ",")); err != nil {
 					return err
 				}
-				fmt.Println("标签已更新")
+				fmt.Println(i18n.Tr("tags updated", "标签已更新"))
 				return nil
 			}
 			// 查看
@@ -48,30 +49,30 @@ func newTagCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("会话：%s\n", sess.SessionID)
+			fmt.Printf("%s %s\n", i18n.Tr("Session:", "会话："), sess.SessionID)
 			if m.Favorite {
-				fmt.Println("收藏：是")
+				fmt.Println(i18n.Tr("Favorite: yes", "收藏：是"))
 			} else {
-				fmt.Println("收藏：否")
+				fmt.Println(i18n.Tr("Favorite: no", "收藏：否"))
 			}
 			if len(m.Tags) > 0 {
-				fmt.Printf("标签：%s\n", strings.Join(m.Tags, ", "))
+				fmt.Printf("%s %s\n", i18n.Tr("Tags:", "标签："), strings.Join(m.Tags, ", "))
 			} else {
-				fmt.Println("标签：无")
+				fmt.Println(i18n.Tr("Tags: none", "标签：无"))
 			}
 			if m.Note != "" {
-				fmt.Printf("备注：%s\n", m.Note)
+				fmt.Printf("%s %s\n", i18n.Tr("Note:", "备注："), m.Note)
 			} else {
-				fmt.Println("备注：无")
+				fmt.Println(i18n.Tr("Note: none", "备注：无"))
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("agent ID", "Agent 标识"))
 
 	cmd.AddCommand(&cobra.Command{
-		Use:   "list [标签]",
-		Short: "列出收藏或指定标签的会话",
+		Use:   "list [tag]",
+		Short: i18n.Tr("list favorited or tagged sessions", "列出收藏或指定标签的会话"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			a, err := app.New(ctx)
@@ -96,7 +97,7 @@ func newTagCmd() *cobra.Command {
 				return err
 			}
 			if len(refs) == 0 {
-				fmt.Println("没有匹配的会话")
+				fmt.Println(i18n.Tr("no matching sessions", "没有匹配的会话"))
 				return nil
 			}
 			for _, r := range refs {
@@ -107,7 +108,7 @@ func newTagCmd() *cobra.Command {
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "favorite <session-id> [on|off]",
-		Short: "设置收藏",
+		Short: i18n.Tr("set favorite", "设置收藏"),
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -131,13 +132,13 @@ func newTagCmd() *cobra.Command {
 			if err := tags.SetFavorite(ctx, db, sess.AgentInstanceID, sess.SessionID, on); err != nil {
 				return err
 			}
-			fmt.Println("收藏已更新")
+			fmt.Println(i18n.Tr("favorite updated", "收藏已更新"))
 			return nil
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
-		Use:   "note <session-id> [文本]",
-		Short: "设置或清除备注",
+		Use:   "note <session-id> [text]",
+		Short: i18n.Tr("set or clear note", "设置或清除备注"),
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -164,7 +165,7 @@ func newTagCmd() *cobra.Command {
 			if err := tags.SetNote(ctx, db, sess.AgentInstanceID, sess.SessionID, note); err != nil {
 				return err
 			}
-			fmt.Println("备注已更新")
+			fmt.Println(i18n.Tr("note updated", "备注已更新"))
 			return nil
 		},
 	})

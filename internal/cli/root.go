@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/tui"
 	"github.com/talea/talea/internal/version"
 )
@@ -49,7 +50,7 @@ func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:     "talea",
 		Short:   "Trace the session. Resume the work.",
-		Long:    "Talea — 本地优先的 AI Coding Agent 会话索引、搜索、预览、Token 分析与恢复工具。",
+		Long:    i18n.Tr("Talea — a local-first AI coding agent session index, search, preview, token analysis and resume tool.", "Talea — 本地优先的 AI Coding Agent 会话索引、搜索、预览、Token 分析与恢复工具。"),
 		Version: version.String(),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -76,7 +77,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newImportCmd())
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
-		Short: "版本信息",
+		Short: i18n.Tr("version info", "版本信息"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Println(version.String())
 			return nil

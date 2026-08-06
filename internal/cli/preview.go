@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/i18n"
 	previewpkg "github.com/talea/talea/internal/preview"
 )
 
@@ -18,7 +19,7 @@ func newPreviewCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "preview <session-id>",
-		Short: "对话预览",
+		Short: i18n.Tr("conversation preview", "对话预览"),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -32,7 +33,7 @@ func newPreviewCmd() *cobra.Command {
 			}
 			ad, ok := a.Registry.Get(sess.AgentID)
 			if !ok {
-				return exitError{code: ExitFormatUnsup, msg: "会话格式不支持"}
+				return exitError{code: ExitFormatUnsup, msg: i18n.Tr("session format not supported", "会话格式不支持")}
 			}
 			// tail 模式取末尾，默认取开头
 			msgs, err := previewpkg.Load(ctx, ad, *sess, previewpkg.Options{
@@ -52,9 +53,9 @@ func newPreviewCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
-	cmd.Flags().IntVar(&limitFlag, "limit", 20, "消息条数")
-	cmd.Flags().BoolVar(&systemFlag, "system", false, "包含系统消息")
-	cmd.Flags().BoolVar(&tailFlag, "tail", false, "查看最后几条（默认查看开头）")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("agent ID", "Agent 标识"))
+	cmd.Flags().IntVar(&limitFlag, "limit", 20, i18n.Tr("message count", "消息条数"))
+	cmd.Flags().BoolVar(&systemFlag, "system", false, i18n.Tr("include system messages", "包含系统消息"))
+	cmd.Flags().BoolVar(&tailFlag, "tail", false, i18n.Tr("show last messages (default head)", "查看最后几条（默认查看开头）"))
 	return cmd
 }

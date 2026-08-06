@@ -6,14 +6,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/talea/talea/internal/app"
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/transfer"
 )
 
 func newExportCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "export <文件>",
-		Short: "导出全部会话到 JSON（含标签/备注）",
+		Use:   "export <file>",
+		Short: i18n.Tr("export all sessions to JSON (with tags/notes)", "导出全部会话到 JSON（含标签/备注）"),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -32,7 +33,7 @@ func newExportCmd() *cobra.Command {
 			if err := transfer.Export(ctx, db, args[0]); err != nil {
 				return err
 			}
-			fmt.Println("已导出：", args[0])
+			fmt.Println(i18n.Tr("exported:", "已导出："), args[0])
 			return nil
 		},
 	}
@@ -41,8 +42,8 @@ func newExportCmd() *cobra.Command {
 
 func newImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "import <文件>",
-		Short: "从 JSON 导入会话（已存在跳过）",
+		Use:   "import <file>",
+		Short: i18n.Tr("import sessions from JSON (skip existing)", "从 JSON 导入会话（已存在跳过）"),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -62,7 +63,7 @@ func newImportCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("已导入 %d 个会话\n", n)
+			fmt.Printf(i18n.Tr("imported %d sessions\n", "已导入 %d 个会话\n"), n)
 			return nil
 		},
 	}

@@ -5,10 +5,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/model"
 )
 
+// setZh 将测试语言设为中文，结束恢复英文。
+func setZh(t *testing.T) {
+	t.Helper()
+	i18n.Set(i18n.LangZh)
+	t.Cleanup(func() { i18n.Set(i18n.LangEn) })
+}
+
 func TestFormatDuration(t *testing.T) {
+	setZh(t)
 	cases := []struct {
 		in   *time.Duration
 		want string
@@ -32,6 +41,7 @@ func sec(n int64) *time.Duration {
 }
 
 func TestTokenString(t *testing.T) {
+	setZh(t)
 	in := int64(1500000)
 	u := &model.TokenUsage{TotalTokens: &in}
 	s := &model.Session{HasTokenUsage: true, TokenUsage: u}
@@ -46,6 +56,7 @@ func TestTokenString(t *testing.T) {
 }
 
 func TestViewOf(t *testing.T) {
+	setZh(t)
 	s := &model.Session{
 		AgentID:          model.AgentClaudeCode,
 		SessionID:        "abc",

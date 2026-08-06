@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/model"
 )
 
@@ -73,7 +74,7 @@ func ViewOf(s *model.Session) SessionView {
 // FormatDuration 输出持续时长。
 func FormatDuration(d *time.Duration) string {
 	if d == nil {
-		return "未知"
+		return i18n.Tr("unknown", "未知")
 	}
 	total := int64(*d / time.Second)
 	if total < 60 {
@@ -99,20 +100,20 @@ func FormatActivity(a model.ActivityState) string {
 func activityText(a model.ActivityState) string {
 	switch a {
 	case model.ActivityActive:
-		return "进行中"
+		return i18n.Tr("Active", "进行中")
 	case model.ActivityPossiblyActive:
-		return "可能进行中"
+		return i18n.Tr("Possibly active", "可能进行中")
 	case model.ActivityInactive:
-		return "已结束"
+		return i18n.Tr("Ended", "已结束")
 	default:
-		return "未知"
+		return i18n.Tr("Unknown", "未知")
 	}
 }
 
 // FormatTokens 将 Token 数值转为可读文本。
 func FormatTokens(u *model.TokenUsage) string {
 	if u == nil {
-		return "未知"
+		return i18n.Tr("unknown", "未知")
 	}
 	var total int64
 	switch {
@@ -125,14 +126,14 @@ func FormatTokens(u *model.TokenUsage) string {
 	case u.OutputTokens != nil:
 		total = *u.OutputTokens
 	default:
-		return "未知"
+		return i18n.Tr("unknown", "未知")
 	}
 	return humanNumber(total)
 }
 
 func tokenString(s *model.Session) string {
 	if s == nil || !s.HasTokenUsage || s.TokenUsage == nil {
-		return "未知"
+		return i18n.Tr("unknown", "未知")
 	}
 	u := s.TokenUsage
 	var total int64
@@ -146,7 +147,7 @@ func tokenString(s *model.Session) string {
 	case u.OutputTokens != nil:
 		total = *u.OutputTokens
 	default:
-		return "未知"
+		return i18n.Tr("unknown", "未知")
 	}
 	return humanNumber(total)
 }
@@ -196,15 +197,18 @@ type Column struct {
 }
 
 // SessionColumns 会话列表共享列定义（list 与 go 共用，改一处两处生效）。
-var SessionColumns = []Column{
-	{Title: "Agent"},
-	{Title: "Session ID", MaxWidth: 24},
-	{Title: "Start"},
-	{Title: "End"},
-	{Title: "Time"},
-	{Title: "Tokens"},
-	{Title: "CWD", MaxWidth: 24, HeadTrun: true},
-	{Title: "First Question"},
+// 每次调用返回新切片：列头语言在渲染时解析（包级 var 会在 init 期锁定语言）。
+func SessionColumns() []Column {
+	return []Column{
+		{Title: i18n.Tr("Agent", "Agent")},
+		{Title: i18n.Tr("Session ID", "会话 ID"), MaxWidth: 24},
+		{Title: i18n.Tr("Start", "开始")},
+		{Title: i18n.Tr("End", "结束")},
+		{Title: i18n.Tr("Time", "时长")},
+		{Title: i18n.Tr("Tokens", "Token")},
+		{Title: i18n.Tr("Path", "目录"), MaxWidth: 24, HeadTrun: true},
+		{Title: i18n.Tr("First Question", "首次提问")},
+	}
 }
 
 // SessionRow 构造会话表格行的原始内容（未截断，8 列与 SessionColumns 对应）。
@@ -224,9 +228,10 @@ func SessionRow(v SessionView) []string {
 // ColumnWidths 计算各列宽度：非 First Question 列取内容最大但受 MaxWidth 限制，
 // First Question（最后一列）占剩余宽度。
 func ColumnWidths(rows [][]string, termWidth int) []int {
-	n := len(SessionColumns)
+	cols := SessionColumns()
+	n := len(cols)
 	widths := make([]int, n)
-	for i, c := range SessionColumns {
+	for i, c := range cols {
 		widths[i] = runeLen(c.Title)
 	}
 	for _, r := range rows {
@@ -238,7 +243,7 @@ func ColumnWidths(rows [][]string, termWidth int) []int {
 			}
 		}
 	}
-	for i, c := range SessionColumns {
+	for i, c := range cols {
 		if c.MaxWidth > 0 && widths[i] > c.MaxWidth {
 			widths[i] = c.MaxWidth
 		}
@@ -315,17 +320,26 @@ func writeCSV(w io.Writer, views []SessionView) error {
 }
 
 func writeMarkdown(w io.Writer, views []SessionView) error {
-	fmt.Fprintf(w, "| Agent | Session ID | 开始 | 结束 | Time | Token | 目录 | 首次提问 |\n")
-	fmt.Fprintf(w, "|-------|------------|------|------|------|-------|------|---------|\n")
+	cols := SessionColumns()
+	fmt.Fprintf(w, "| %s |\n", strings.Join(titles(cols), " | "))
+	fmt.Fprintf(w, "|%s\n", strings.Repeat("---|", len(cols)))
 	for _, v := range views {
-		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s | %s |\n",
-			v.Agent, v.SessionID, v.StartedAt, v.EndedAt, v.Duration, v.Tokens, shortDir(v.WorkingDirectory), oneLine(v.FirstQuestion))
+		fmt.Fprintf(w, "| %s |\n", strings.Join(SessionRow(v), " | "))
 	}
 	return nil
 }
 
+func titles(cols []Column) []string {
+	out := make([]string, len(cols))
+	for i, c := range cols {
+		out[i] = c.Title
+	}
+	return out
+}
+
 func writeTable(w io.Writer, views []SessionView) error {
-	n := len(SessionColumns)
+	cols := SessionColumns()
+	n := len(cols)
 	rows := make([][]string, len(views))
 	for i, v := range views {
 		rows[i] = SessionRow(v)
@@ -336,7 +350,7 @@ func writeTable(w io.Writer, views []SessionView) error {
 	render := func(row []string) []string {
 		cur := make([]string, n)
 		for j := 0; j < n; j++ {
-			c := SessionColumns[j]
+			c := cols[j]
 			if c.HeadTrun {
 				cur[j] = truncateHead(row[j], widths[j])
 			} else {
@@ -354,7 +368,7 @@ func writeTable(w io.Writer, views []SessionView) error {
 		total += w
 	}
 	hd := make([]string, n)
-	for i, h := range SessionColumns {
+	for i, h := range cols {
 		hd[i] = h.Title
 	}
 	fmt.Fprintf(w, "%s\n", align(hd, widths))

@@ -5,6 +5,8 @@ import (
 	"os"
 	"sort"
 
+	"github.com/talea/talea/internal/i18n"
+
 	"github.com/spf13/cobra"
 
 	"github.com/talea/talea/internal/app"
@@ -30,7 +32,7 @@ func newListCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "列出会话",
+		Short: i18n.Tr("list sessions", "列出会话"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			a, err := app.New(ctx)
@@ -102,16 +104,16 @@ func newListCmd() *cobra.Command {
 			return output.Write(os.Stdout, sessions, output.Format(formatFlag))
 		},
 	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "按 Agent 过滤")
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "按工作目录前缀过滤")
-	cmd.Flags().StringVar(&projectFlag, "project", "", "按项目名称过滤")
-	cmd.Flags().StringVar(&branchFlag, "branch", "", "按 Git 分支过滤")
-	cmd.Flags().BoolVar(&todayFlag, "today", false, "仅今天")
-	cmd.Flags().BoolVar(&activeFlag, "active", false, "仅活动会话")
-	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, "包含子 Agent 会话")
-	cmd.Flags().StringVar(&sortFlag, "sort", "", "排序：last_activity/started_at/tokens/name")
-	cmd.Flags().IntVar(&limitFlag, "limit", 30, "最多条数（默认最近 30 个）")
-	cmd.Flags().StringVar(&formatFlag, "format", "table", "输出格式：table/json/jsonl/csv/markdown")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("filter by agent", "按 Agent 过滤"))
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("filter by working directory prefix", "按工作目录前缀过滤"))
+	cmd.Flags().StringVar(&projectFlag, "project", "", i18n.Tr("filter by project name", "按项目名称过滤"))
+	cmd.Flags().StringVar(&branchFlag, "branch", "", i18n.Tr("filter by git branch", "按 Git 分支过滤"))
+	cmd.Flags().BoolVar(&todayFlag, "today", false, i18n.Tr("today only", "仅今天"))
+	cmd.Flags().BoolVar(&activeFlag, "active", false, i18n.Tr("active sessions only", "仅活动会话"))
+	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, i18n.Tr("include sub-agent sessions", "包含子 Agent 会话"))
+	cmd.Flags().StringVar(&sortFlag, "sort", "", i18n.Tr("sort: last_activity/started_at/tokens/name", "排序：last_activity/started_at/tokens/name"))
+	cmd.Flags().IntVar(&limitFlag, "limit", 30, i18n.Tr("max items (default recent 30)", "最多条数（默认最近 30 个）"))
+	cmd.Flags().StringVar(&formatFlag, "format", "table", i18n.Tr("output format: table/json/jsonl/csv/markdown", "输出格式：table/json/jsonl/csv/markdown"))
 	return cmd
 }
 
@@ -126,8 +128,8 @@ func newSearchCmd() *cobra.Command {
 		formatFlag  string
 	)
 	cmd := &cobra.Command{
-		Use:   "search [关键词]",
-		Short: "跨 Agent 全文搜索",
+		Use:   "search [keyword]",
+		Short: i18n.Tr("full-text search across agents", "跨 Agent 全文搜索"),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -170,13 +172,13 @@ func newSearchCmd() *cobra.Command {
 			return output.Write(os.Stdout, sessions, output.Format(formatFlag))
 		},
 	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "按 Agent 过滤")
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "按工作目录前缀过滤")
-	cmd.Flags().StringVar(&projectFlag, "project", "", "按项目名称过滤")
-	cmd.Flags().StringVar(&branchFlag, "branch", "", "按 Git 分支过滤")
-	cmd.Flags().IntVar(&sinceFlag, "since", 0, "最近 N 天")
-	cmd.Flags().IntVar(&limitFlag, "limit", 0, "最多条数")
-	cmd.Flags().StringVar(&formatFlag, "format", "table", "输出格式：table/json/jsonl/csv/markdown")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("filter by agent", "按 Agent 过滤"))
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("filter by working directory prefix", "按工作目录前缀过滤"))
+	cmd.Flags().StringVar(&projectFlag, "project", "", i18n.Tr("filter by project name", "按项目名称过滤"))
+	cmd.Flags().StringVar(&branchFlag, "branch", "", i18n.Tr("filter by git branch", "按 Git 分支过滤"))
+	cmd.Flags().IntVar(&sinceFlag, "since", 0, i18n.Tr("recent N days", "最近 N 天"))
+	cmd.Flags().IntVar(&limitFlag, "limit", 0, i18n.Tr("max items", "最多条数"))
+	cmd.Flags().StringVar(&formatFlag, "format", "table", i18n.Tr("output format: table/json/jsonl/csv/markdown", "输出格式：table/json/jsonl/csv/markdown"))
 	return cmd
 }
 
@@ -187,7 +189,7 @@ func newIndexCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "index",
-		Short: "增量索引 Agent 会话",
+		Short: i18n.Tr("incrementally index agent sessions", "增量索引 Agent 会话"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			a, err := app.New(ctx)
@@ -223,10 +225,10 @@ func newIndexCmd() *cobra.Command {
 			if !metadataOnly {
 				ix := &index.Indexer{App: a, DB: db}
 				if n, err := ix.ResolveSubagentRelations(ctx); err == nil && n > 0 {
-					fmt.Fprintf(os.Stdout, "子 Agent 聚合：%d 条关系\n", n)
+					fmt.Fprintf(os.Stdout, i18n.Tr("sub-agent aggregation: %d relations\n", "子 Agent 聚合：%d 条关系\n"), n)
 				}
 				if n, err := ix.RefreshActivities(ctx); err == nil && n > 0 {
-					fmt.Fprintf(os.Stdout, "活动状态检测：%d 个会话\n", n)
+					fmt.Fprintf(os.Stdout, i18n.Tr("activity detection: %d sessions\n", "活动状态检测：%d 个会话\n"), n)
 				}
 			}
 			for _, r := range results {
@@ -234,7 +236,7 @@ func newIndexCmd() *cobra.Command {
 				if r.Errors > 0 {
 					status = fmt.Sprintf("ERROR %d", r.Errors)
 				}
-				fmt.Fprintf(os.Stdout, "%s：新增 %d，更新 %d，跳过 %d，%s\n",
+				fmt.Fprintf(os.Stdout, i18n.Tr("%s: added %d, updated %d, skipped %d, %s\n", "%s：新增 %d，更新 %d，跳过 %d，%s\n"),
 					r.AgentID, r.Added, r.Updated, r.Skipped, status)
 				for _, m := range r.ErrorMsgs {
 					fmt.Fprintf(os.Stderr, "  - %s\n", m)
@@ -243,19 +245,19 @@ func newIndexCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&rebuildFlag, "rebuild", false, "全量重建索引")
-	cmd.Flags().BoolVar(&metadataOnly, "metadata-only", false, "仅索引元数据")
+	cmd.Flags().BoolVar(&rebuildFlag, "rebuild", false, i18n.Tr("full rebuild index", "全量重建索引"))
+	cmd.Flags().BoolVar(&metadataOnly, "metadata-only", false, i18n.Tr("metadata only", "仅索引元数据"))
 	return cmd
 }
 
 func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "配置管理",
+		Short: i18n.Tr("configuration management", "配置管理"),
 	}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "path",
-		Short: "显示配置路径",
+		Short: i18n.Tr("show config path", "显示配置路径"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p := config.ResolvePaths()
 			fmt.Println(p.ConfigPath)
@@ -264,11 +266,11 @@ func newConfigCmd() *cobra.Command {
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "init",
-		Short: "生成默认配置文件",
+		Short: i18n.Tr("generate default config file", "生成默认配置文件"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p := config.ResolvePaths()
 			if _, err := os.Stat(p.ConfigPath); err == nil {
-				return fmt.Errorf("配置已存在：%s", p.ConfigPath)
+				return fmt.Errorf(i18n.Tr("config already exists: %s", "配置已存在：%s"), p.ConfigPath)
 			}
 			if err := os.MkdirAll(p.ConfigDir, 0o700); err != nil {
 				return err
@@ -276,13 +278,13 @@ func newConfigCmd() *cobra.Command {
 			if err := os.WriteFile(p.ConfigPath, []byte(defaultConfigTOML()), 0o600); err != nil {
 				return err
 			}
-			fmt.Printf("已生成配置：%s\n", p.ConfigPath)
+			fmt.Printf(i18n.Tr("config written: %s\n", "已生成配置：%s\n"), p.ConfigPath)
 			return nil
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
 		Use:   "validate",
-		Short: "校验配置",
+		Short: i18n.Tr("validate config", "校验配置"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p := config.ResolvePaths()
 			cfg, err := config.Load(p.ConfigPath)
@@ -290,7 +292,7 @@ func newConfigCmd() *cobra.Command {
 				return err
 			}
 			_ = cfg
-			fmt.Println("配置有效：", p.ConfigPath)
+			fmt.Println(i18n.Tr("config valid:", "配置有效："), p.ConfigPath)
 			return nil
 		},
 	})

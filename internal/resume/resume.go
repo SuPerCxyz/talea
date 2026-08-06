@@ -2,6 +2,7 @@
 package resume
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/talea/talea/internal/adapters"
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/model"
 )
 
@@ -63,7 +65,7 @@ func Build(s model.Session, overrideDir string, mappings map[string]string) (Pla
 	}
 
 	if target == "" {
-		return Plan{}, fmt.Errorf("会话没有可恢复的工作目录")
+		return Plan{}, errors.New(i18n.Tr("session has no resumable working directory", "会话没有可恢复的工作目录"))
 	}
 
 	return Plan{
@@ -78,14 +80,14 @@ func Build(s model.Session, overrideDir string, mappings map[string]string) (Pla
 // binary 由调用方预先解析（LookPath），argv[0] 为二进制路径。
 func Exec(plan Plan) error {
 	if plan.Command.Program == "" {
-		return fmt.Errorf("缺少恢复程序")
+		return errors.New(i18n.Tr("missing resume program", "缺少恢复程序"))
 	}
 	binary, err := exec.LookPath(plan.Command.Program)
 	if err != nil {
-		return fmt.Errorf("未找到 %q: %w", plan.Command.Program, err)
+		return fmt.Errorf("%s: %w", i18n.Trf("%q not found", "未找到 %q", plan.Command.Program), err)
 	}
 	if err := os.Chdir(plan.TargetDir); err != nil {
-		return fmt.Errorf("无法进入目录 %s: %w", plan.TargetDir, err)
+		return fmt.Errorf("%s: %w", i18n.Trf("cannot enter directory %s", "无法进入目录 %s", plan.TargetDir), err)
 	}
 	// 恢复终端：退出备用屏幕、显示光标、清屏。TUI 调用时 Bubble Tea
 	// 的 alt screen 清理因进程替换不会执行，需手动恢复，避免退出会话后
@@ -105,7 +107,7 @@ func resetTerminal() {
 func ResolveProgram(program string) (string, error) {
 	b, err := exec.LookPath(program)
 	if err != nil {
-		return "", fmt.Errorf("未找到可执行文件 %q，请确认已安装对应 Agent", program)
+		return "", errors.New(i18n.Trf("executable %q not found; please install the corresponding agent", "未找到可执行文件 %q，请确认已安装对应 Agent", program))
 	}
 	return b, nil
 }

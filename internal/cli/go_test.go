@@ -4,12 +4,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/model"
 )
 
 func int64p(n int64) *int64 { return &n }
 
 func TestGoRow(t *testing.T) {
+	i18n.Set(i18n.LangZh)
+	t.Cleanup(func() { i18n.Set(i18n.LangEn) })
 	start := time.Date(2026, 8, 5, 16, 41, 0, 0, time.Local)
 	end := time.Date(2026, 8, 5, 17, 0, 0, 0, time.Local)
 	dur := 19 * time.Minute

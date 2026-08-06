@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/talea/talea/internal/i18n"
+
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/table"
@@ -29,8 +31,8 @@ func newGoCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "go [session-id]",
-		Short: "交互式选择会话并进入",
-		Long:  "不带会话 ID 时进入交互式表格选择器，选中后 Enter 恢复；带会话 ID 时直接恢复。",
+		Short: i18n.Tr("interactively pick a session and enter it", "交互式选择会话并进入"),
+		Long:  i18n.Tr("Without a session ID, opens an interactive table picker; select and press Enter to resume. With a session ID, resumes directly.", "不带会话 ID 时进入交互式表格选择器，选中后 Enter 恢复；带会话 ID 时直接恢复。"),
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -46,14 +48,14 @@ func newGoCmd() *cobra.Command {
 				return resumeSession(ctx, a, sess, cwdFlag, dryRunFlag)
 			}
 			if !isTTY(os.Stdin) {
-				return exitError{code: ExitUsage, msg: "交互式选择需要终端，请指定会话 ID：talea go <session-id>"}
+				return exitError{code: ExitUsage, msg: i18n.Tr("interactive picker needs a terminal; specify a session ID: talea go <session-id>", "交互式选择需要终端，请指定会话 ID：talea go <session-id>")}
 			}
 			return goSelect(ctx, a)
 		},
 	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "目标目录（覆盖原目录）")
-	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "仅打印恢复命令")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("agent ID", "Agent 标识"))
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("target directory (override original)", "目标目录（覆盖原目录）"))
+	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, i18n.Tr("print resume command only", "仅打印恢复命令"))
 	return cmd
 }
 
@@ -137,8 +139,9 @@ func newGoModel(ctx context.Context, a *app.App, sessions []*model.Session) *goM
 		termW = w
 	}
 	widths := output.ColumnWidths(rows, termW)
-	columns := make([]table.Column, 0, len(output.SessionColumns))
-	for i, c := range output.SessionColumns {
+	cols := output.SessionColumns()
+	columns := make([]table.Column, 0, len(cols))
+	for i, c := range cols {
 		columns = append(columns, table.Column{Title: c.Title, Width: widths[i]})
 	}
 	tr := make([]table.Row, 0, len(rows))
@@ -157,8 +160,8 @@ func newGoModel(ctx context.Context, a *app.App, sessions []*model.Session) *goM
 	t.SetStyles(s)
 
 	km := goKeys{
-		Quit:  key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", "退出")),
-		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "进入会话")),
+		Quit:  key.NewBinding(key.WithKeys("q", "esc", "ctrl+c"), key.WithHelp("q", i18n.Tr("quit", "退出"))),
+		Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", i18n.Tr("enter session", "进入会话"))),
 	}
 	return &goModel{
 		sess:   sessions,
@@ -198,7 +201,7 @@ func (m *goModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *goModel) View() string {
 	var sb strings.Builder
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).Render("Talea · 选择会话后进入（Enter）") + "\n\n")
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")).Render(i18n.Tr("Talea · pick a session and press Enter", "Talea · 选择会话后进入（Enter）")) + "\n\n")
 	sb.WriteString(m.table.View())
 	sb.WriteString("\n" + m.help.View(m.keys))
 	return sb.String()

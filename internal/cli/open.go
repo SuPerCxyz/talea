@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/talea/talea/internal/i18n"
+
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
@@ -21,7 +23,7 @@ import (
 func newLastCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "last",
-		Short: "当前目录最近会话",
+		Short: i18n.Tr("recent session in current directory", "当前目录最近会话"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			cwd, err := os.Getwd()
@@ -48,20 +50,20 @@ func newLastCmd() *cobra.Command {
 				return err
 			}
 			if len(results) == 0 {
-				fmt.Println("当前目录没有索引的会话")
+				fmt.Println(i18n.Tr("no indexed sessions in current directory", "当前目录没有索引的会话"))
 				return nil
 			}
 			sess := &results[0].Session
 			sess.WorkingDirExists = dirExists(sess.WorkingDirectory)
 			sess.Activity = model.ActivityInactive
-			fmt.Printf("Agent：%s\n", sess.AgentID)
-			fmt.Printf("会话 ID：%s\n", sess.SessionID)
-			fmt.Printf("首次提问：%s\n", firstLine(sess.FirstQuestion))
+			fmt.Printf("%s %s\n", i18n.Tr("Agent:", "Agent："), sess.AgentID)
+			fmt.Printf("%s %s\n", i18n.Tr("Session ID:", "会话 ID："), sess.SessionID)
+			fmt.Printf("%s %s\n", i18n.Tr("First question:", "首次提问："), firstLine(sess.FirstQuestion))
 			if sess.StartedAt != nil {
-				fmt.Printf("开始：%s\n", sess.StartedAt.Format("2006-01-02 15:04"))
+				fmt.Printf("%s %s\n", i18n.Tr("Started:", "开始："), sess.StartedAt.Format("2006-01-02 15:04"))
 			}
 			if sess.WorkingDirectory != "" {
-				fmt.Printf("目录：%s\n", sess.WorkingDirectory)
+				fmt.Printf("%s %s\n", i18n.Tr("Directory:", "目录："), sess.WorkingDirectory)
 			}
 			return nil
 		},
@@ -83,7 +85,7 @@ func resumeSession(ctx context.Context, a *app.App, sess *model.Session, cwdFlag
 		}
 		switch action {
 		case "cancel":
-			return exitError{code: ExitNoWorkdir, msg: "已取消恢复"}
+			return exitError{code: ExitNoWorkdir, msg: i18n.Tr("resume cancelled", "已取消恢复")}
 		case "mapped":
 			if newTarget != "" {
 				plan.TargetDir = newTarget
@@ -94,11 +96,11 @@ func resumeSession(ctx context.Context, a *app.App, sess *model.Session, cwdFlag
 
 	ad, ok := a.Registry.Get(sess.AgentID)
 	if !ok {
-		return exitError{code: ExitFormatUnsup, msg: "会话格式不支持"}
+		return exitError{code: ExitFormatUnsup, msg: i18n.Tr("session format not supported", "会话格式不支持")}
 	}
 	resumer, ok := adapters.As[adapters.Resumer](ad)
 	if !ok {
-		return exitError{code: ExitCapMissing, msg: "Agent 不支持恢复能力"}
+		return exitError{code: ExitCapMissing, msg: i18n.Tr("agent does not support resume", "Agent 不支持恢复能力")}
 	}
 	cmd2, err := resumer.BuildResumeCommand(*sess, plan.TargetDir)
 	if err != nil {
@@ -107,10 +109,10 @@ func resumeSession(ctx context.Context, a *app.App, sess *model.Session, cwdFlag
 	plan.Command = cmd2
 
 	if dryRun {
-		fmt.Printf("Agent：%s\n", displayNameOf(ad))
-		fmt.Printf("目录：%s\n", plan.TargetDir)
-		fmt.Printf("程序：%s\n", plan.Command.Program)
-		fmt.Printf("参数：%s\n", strings.Join(plan.Command.Args, " "))
+		fmt.Printf("%s %s\n", i18n.Tr("Agent:", "Agent："), displayNameOf(ad))
+		fmt.Printf("%s %s\n", i18n.Tr("Directory:", "目录："), plan.TargetDir)
+		fmt.Printf("%s %s\n", i18n.Tr("Program:", "程序："), plan.Command.Program)
+		fmt.Printf("%s %s\n", i18n.Tr("Arguments:", "参数："), strings.Join(plan.Command.Args, " "))
 		return nil
 	}
 
@@ -123,13 +125,13 @@ func resumeSession(ctx context.Context, a *app.App, sess *model.Session, cwdFlag
 // handleMissingDir 原目录不存在时提示指定新目录，回车默认 /tmp。
 // 非 TTY 时直接使用默认 /tmp。
 func handleMissingDir(sess *model.Session, missingDir string, mappings map[string]string) (string, string, error) {
-	fmt.Fprintf(os.Stderr, "\n原工作目录不存在：\n\n%s\n\n", missingDir)
+	fmt.Fprintf(os.Stderr, "\n%s\n\n%s\n\n", i18n.Tr("Original working directory missing:", "原工作目录不存在："), missingDir)
 	if !isTTY(os.Stdin) {
-		fmt.Fprintln(os.Stderr, "将使用默认目录 /tmp 恢复。")
+		fmt.Fprintln(os.Stderr, i18n.Tr("will resume with default directory /tmp.", "将使用默认目录 /tmp 恢复。"))
 		return "/tmp", "mapped", nil
 	}
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Fprint(os.Stderr, "请输入新目录（回车默认 /tmp）：")
+	fmt.Fprint(os.Stderr, i18n.Tr("Enter a new directory (Enter defaults to /tmp): ", "请输入新目录（回车默认 /tmp）："))
 	line, err := reader.ReadString('\n')
 	if err != nil {
 		return "", "cancel", err
@@ -141,7 +143,7 @@ func handleMissingDir(sess *model.Session, missingDir string, mappings map[strin
 	if dirExists(dir) {
 		return dir, "mapped", nil
 	}
-	fmt.Fprintf(os.Stderr, "目录 %q 不存在，将使用默认 /tmp 恢复。\n", dir)
+	fmt.Fprintf(os.Stderr, i18n.Tr("directory %q does not exist, using default /tmp.\n", "目录 %q 不存在，将使用默认 /tmp 恢复。\n"), dir)
 	return "/tmp", "mapped", nil
 }
 
@@ -162,7 +164,7 @@ func (e exitError) Error() string {
 	if e.msg != "" {
 		return e.msg
 	}
-	return fmt.Sprintf("退出码 %d", e.code)
+	return fmt.Sprintf(i18n.Tr("exit code %d", "退出码 %d"), e.code)
 }
 
 // findSession 从索引定位会话（支持前缀匹配）。
@@ -197,10 +199,7 @@ func findSession(ctx context.Context, a *app.App, id, agent string) (*model.Sess
 			return &s, nil
 		}
 	}
-	if len(results) > 0 {
-		return nil, exitError{code: ExitNotFound, msg: fmt.Sprintf("未找到会话 %q", id)}
-	}
-	return nil, exitError{code: ExitNotFound, msg: fmt.Sprintf("未找到会话 %q", id)}
+	return nil, exitError{code: ExitNotFound, msg: i18n.Trf("session %q not found", "未找到会话 %q", id)}
 }
 
 func displayNameOf(ad adapters.Adapter) string {

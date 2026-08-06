@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/talea/talea/internal/cli/output"
 	"github.com/talea/talea/internal/cost"
 	"github.com/talea/talea/internal/doctor"
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/insights"
 	"github.com/talea/talea/internal/model"
@@ -33,7 +35,7 @@ func newUsageCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "usage <session-id>",
-		Short: "Token 汇总",
+		Short: i18n.Tr("token usage summary", "Token 汇总"),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -58,45 +60,40 @@ func newUsageCmd() *cobra.Command {
 				return showMetrics(ctx, db, sess)
 			}
 			u, err := usage.Load(ctx, db, sess.AgentInstanceID, sess.SessionID)
-			if err != nil {
-				// 无 usage 记录
-				fmt.Println("当前 Agent 会话格式未提供 Token 使用数据")
-				return nil
-			}
-			if u == nil {
-				fmt.Println("当前 Agent 会话格式未提供 Token 使用数据")
+			if err != nil || u == nil {
+				fmt.Println(i18n.Tr("this agent session format has no token usage data", "当前 Agent 会话格式未提供 Token 使用数据"))
 				return nil
 			}
 
-			fmt.Printf("会话：%s\n", sess.SessionID)
-			fmt.Printf("Agent：%s\n", sess.AgentID)
-			printUsage("输入", u.InputTokens)
-			printUsage("输出", u.OutputTokens)
-			printUsage("总计", u.TotalTokens)
-			printUsage("缓存读", u.CacheReadTokens)
-			printUsage("缓存写", u.CacheWriteTokens)
-			printUsage("推理", u.ReasoningTokens)
-			printUsage("请求数", u.RequestCount)
-			printUsage("上下文峰值", u.PeakContextTokens)
+			fmt.Printf("%s %s\n", i18n.Tr("Session:", "会话："), sess.SessionID)
+			fmt.Printf("%s %s\n", i18n.Tr("Agent:", "Agent："), sess.AgentID)
+			printUsage(i18n.Tr("Input", "输入"), u.InputTokens)
+			printUsage(i18n.Tr("Output", "输出"), u.OutputTokens)
+			printUsage(i18n.Tr("Total", "总计"), u.TotalTokens)
+			printUsage(i18n.Tr("Cache read", "缓存读"), u.CacheReadTokens)
+			printUsage(i18n.Tr("Cache write", "缓存写"), u.CacheWriteTokens)
+			printUsage(i18n.Tr("Reasoning", "推理"), u.ReasoningTokens)
+			printUsage(i18n.Tr("Requests", "请求数"), u.RequestCount)
+			printUsage(i18n.Tr("Peak context", "上下文峰值"), u.PeakContextTokens)
 			if u.DirectChildTokens != nil {
-				printUsage("直接子会话", u.DirectChildTokens)
+				printUsage(i18n.Tr("Direct sub-sessions", "直接子会话"), u.DirectChildTokens)
 			}
 			if u.DescendantTokens != nil {
-				printUsage("所有后代会话", u.DescendantTokens)
+				printUsage(i18n.Tr("All descendants", "所有后代会话"), u.DescendantTokens)
 			}
-			fmt.Printf("数据来源：%s\n", u.Source)
-			fmt.Printf("完整性：%s\n", u.Completeness)
+			fmt.Printf("%s %s\n", i18n.Tr("Data source:", "数据来源："), u.Source)
+			fmt.Printf("%s %s\n", i18n.Tr("Completeness:", "完整性："), u.Completeness)
 			if u.IsEstimated {
-				fmt.Println("注：部分数值为估算值")
+				fmt.Println(i18n.Tr("Note: some values are estimates", "注：部分数值为估算值"))
 			}
 			// 费用估算（仅当配置启用）
 			if a.Config.Usage.EstimateCost {
 				if micros, currency, at, ok := cost.Estimate(u, a.Config.Usage.Pricing); ok {
-					fmt.Printf("估算费用：%s（%s，价格快照 %s）\n",
+					fmt.Printf(i18n.Tr("Estimated cost: %s (%s, price snapshot %s)\n", "估算费用：%s（%s，价格快照 %s）\n"),
 						cost.Format(*micros, currency), currency, at.Format("2006-01-02 15:04"))
-					fmt.Println("注：估算费用不替代供应商账单")
+					fmt.Println(i18n.Tr("Note: estimated cost is not a substitute for vendor billing", "注：估算费用不替代供应商账单"))
 				} else {
-					fmt.Println("估算费用：无法估算（缺少价格表或模型信息）")
+					fmt.Println(i18n.Tr("Estimated cost: cannot estimate (missing price table or model info)", "估算费用：无法估算（缺少价格表或模型信息）"))
 				}
 			}
 
@@ -107,9 +104,10 @@ func newUsageCmd() *cobra.Command {
 					Limit:           200,
 				})
 				if err == nil && len(events) > 0 {
-					fmt.Println("\n请求级明细：")
+					fmt.Println("\n" + i18n.Tr("Request-level details:", "请求级明细："))
 					fmt.Printf("  %-10s  %-14s  %-8s  %-8s  %-8s  %-8s\n",
-						"时间", "模型", "输入", "输出", "缓存读", "总计")
+						i18n.Tr("Time", "时间"), i18n.Tr("Model", "模型"), i18n.Tr("Input", "输入"),
+						i18n.Tr("Output", "输出"), i18n.Tr("Cache read", "缓存读"), i18n.Tr("Total", "总计"))
 					for _, e := range events {
 						if e.EventType != model.UsageEventRequest {
 							continue
@@ -125,28 +123,28 @@ func newUsageCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
-	cmd.Flags().BoolVar(&detailsFlag, "details", false, "显示时间线明细")
-	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, "包含子 Agent")
-	cmd.Flags().BoolVar(&metricsFlag, "metrics", false, "Token 速率与占比指标")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("agent ID", "Agent 标识"))
+	cmd.Flags().BoolVar(&detailsFlag, "details", false, i18n.Tr("show timeline details", "显示时间线明细"))
+	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, i18n.Tr("include sub-agents", "包含子 Agent"))
+	cmd.Flags().BoolVar(&metricsFlag, "metrics", false, i18n.Tr("token rate and share metrics", "Token 速率与占比指标"))
 	return cmd
 }
 
-// showMetrics 展示 Token 速率/缓存/模型占比指标（spec §14.8）。
+// showMetrics 展示 Token 速率/缓存/模型占比指标。
 func showMetrics(ctx context.Context, db *index.DB, sess *model.Session) error {
 	m, err := timeline.ComputeMetrics(ctx, db, sess.AgentInstanceID, sess.SessionID)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("会话：%s\n", sess.SessionID)
-	fmt.Printf("时长：%s\n", humanDur(m.DurationSeconds))
-	fmt.Printf("Token/分钟：%.0f\n", m.TokenPerMinute)
-	fmt.Printf("累计 Token：%s\n", human(m.CumulativeTotal))
-	fmt.Printf("输入占比：%.1f%%  输出占比：%.1f%%\n", m.InputShare*100, m.OutputShare*100)
-	fmt.Printf("缓存利用率：%.1f%%\n", m.CacheUtilization*100)
-	fmt.Printf("请求数：%d\n", m.Requests)
+	fmt.Printf("%s %s\n", i18n.Tr("Session:", "会话："), sess.SessionID)
+	fmt.Printf("%s %s\n", i18n.Tr("Duration:", "时长："), humanDur(m.DurationSeconds))
+	fmt.Printf("%s %.0f\n", i18n.Tr("Tokens/min:", "Token/分钟："), m.TokenPerMinute)
+	fmt.Printf("%s %s\n", i18n.Tr("Cumulative tokens:", "累计 Token："), human(m.CumulativeTotal))
+	fmt.Printf("%s %.1f%%  %s %.1f%%\n", i18n.Tr("Input share:", "输入占比："), m.InputShare*100, i18n.Tr("Output share:", "输出占比："), m.OutputShare*100)
+	fmt.Printf("%s %.1f%%\n", i18n.Tr("Cache utilization:", "缓存利用率："), m.CacheUtilization*100)
+	fmt.Printf("%s %d\n", i18n.Tr("Requests:", "请求数："), m.Requests)
 	if len(m.ModelShare) > 0 {
-		fmt.Println("\n模型占比：")
+		fmt.Println("\n" + i18n.Tr("Model share:", "模型占比："))
 		total := int64(0)
 		for _, v := range m.ModelShare {
 			total += v
@@ -162,7 +160,7 @@ func showMetrics(ctx context.Context, db *index.DB, sess *model.Session) error {
 
 func humanDur(sec int64) string {
 	if sec <= 0 {
-		return "未知"
+		return i18n.Tr("unknown", "未知")
 	}
 	h := sec / 3600
 	m := (sec % 3600) / 60
@@ -191,7 +189,7 @@ func newTimelineCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "timeline <session-id>",
-		Short: "Token 时间线",
+		Short: i18n.Tr("token timeline", "Token 时间线"),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -235,7 +233,7 @@ func newTimelineCmd() *cobra.Command {
 				return err
 			}
 			if len(events) == 0 {
-				fmt.Println("该会话没有 Token 时间线数据")
+				fmt.Println(i18n.Tr("this session has no token timeline data", "该会话没有 Token 时间线数据"))
 				return nil
 			}
 
@@ -250,9 +248,11 @@ func newTimelineCmd() *cobra.Command {
 				defer f.Close()
 				writer = f
 			}
-			fmt.Fprintf(writer, "会话：%s  请求：%d  累计总计：%s  上下文峰值：%s\n",
-				sess.SessionID, summary.RequestCount,
-				humanP(summary.CumulativeTotal), humanP(summary.PeakContext))
+			fmt.Fprintf(writer, "%s %s  %s %d  %s %s  %s %s\n",
+				i18n.Tr("Session:", "会话："), sess.SessionID,
+				i18n.Tr("Requests:", "请求："), summary.RequestCount,
+				i18n.Tr("Cumulative total:", "累计总计："), humanP(summary.CumulativeTotal),
+				i18n.Tr("Peak context:", "上下文峰值："), humanP(summary.PeakContext))
 			fmt.Fprintln(writer)
 
 			switch groupBy {
@@ -275,21 +275,21 @@ func newTimelineCmd() *cobra.Command {
 					}
 				}
 			default:
-				return fmt.Errorf("不支持的 group-by：%s", groupBy)
+				return errors.New(i18n.Trf("unsupported group-by: %s", "不支持的 group-by：%s", groupBy))
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "Agent 标识")
-	cmd.Flags().StringVar(&groupBy, "group-by", "", "聚合维度：turn/request")
-	cmd.Flags().StringVar(&bucket, "bucket", "", "时间桶：1m/5m/15m/1h")
-	cmd.Flags().BoolVar(&aroundPeak, "around-peak", false, "峰值附近")
-	cmd.Flags().StringVar(&formatFlag, "format", "table", "输出格式：table/json/csv/markdown")
-	cmd.Flags().StringVar(&outputFile, "output", "", "输出文件")
-	cmd.Flags().BoolVar(&byModelFlag, "by-model", false, "按模型汇总")
-	cmd.Flags().BoolVar(&contextFlag, "context", false, "上下文窗口曲线")
-	cmd.Flags().BoolVar(&insightsFlag, "insights", false, "Token 消耗洞察")
-	cmd.Flags().StringVar(&chartFlag, "chart", "", "图表：rate(每桶速率)/cumulative(累计)/context(上下文)")
+	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("agent ID", "Agent 标识"))
+	cmd.Flags().StringVar(&groupBy, "group-by", "", i18n.Tr("aggregation dimension: turn/request", "聚合维度：turn/request"))
+	cmd.Flags().StringVar(&bucket, "bucket", "", i18n.Tr("time bucket: 1m/5m/15m/1h", "时间桶：1m/5m/15m/1h"))
+	cmd.Flags().BoolVar(&aroundPeak, "around-peak", false, i18n.Tr("around peak", "峰值附近"))
+	cmd.Flags().StringVar(&formatFlag, "format", "table", i18n.Tr("output format: table/json/csv/markdown", "输出格式：table/json/csv/markdown"))
+	cmd.Flags().StringVar(&outputFile, "output", "", i18n.Tr("output file", "输出文件"))
+	cmd.Flags().BoolVar(&byModelFlag, "by-model", false, i18n.Tr("summarize by model", "按模型汇总"))
+	cmd.Flags().BoolVar(&contextFlag, "context", false, i18n.Tr("context window curve", "上下文窗口曲线"))
+	cmd.Flags().BoolVar(&insightsFlag, "insights", false, i18n.Tr("token consumption insights", "Token 消耗洞察"))
+	cmd.Flags().StringVar(&chartFlag, "chart", "", i18n.Tr("chart: rate/cumulative/context", "图表：rate(每桶速率)/cumulative(累计)/context(上下文)"))
 	return cmd
 }
 
@@ -304,17 +304,17 @@ func showChart(ctx context.Context, db *index.DB, sess *model.Session, chartKind
 			return err
 		}
 		if len(pts) == 0 {
-			return fmt.Errorf("没有上下文数据")
+			return errors.New(i18n.Tr("no context data", "没有上下文数据"))
 		}
 		vals := make([]float64, len(pts))
 		for i, p := range pts {
 			vals[i] = float64(p.Context)
 		}
-		fmt.Println("上下文曲线：")
+		fmt.Println(i18n.Tr("Context curve:", "上下文曲线："))
 		fmt.Println(chart.Line(vals, 60))
 		return nil
 	default:
-		return fmt.Errorf("未知图表类型：%s（可用 rate/cumulative/context）", chartKind)
+		return errors.New(i18n.Trf("unknown chart type: %s (available rate/cumulative/context)", "未知图表类型：%s（可用 rate/cumulative/context）", chartKind))
 	}
 }
 
@@ -325,7 +325,7 @@ func showRateChart(ctx context.Context, db *index.DB, sess *model.Session, kind 
 		return err
 	}
 	if len(buckets) == 0 {
-		return fmt.Errorf("没有可聚合的数据")
+		return errors.New(i18n.Tr("no aggregable data", "没有可聚合的数据"))
 	}
 	if kind == "cumulative" {
 		vals := make([]float64, len(buckets))
@@ -334,7 +334,7 @@ func showRateChart(ctx context.Context, db *index.DB, sess *model.Session, kind 
 			cum += b.TotalTokens
 			vals[i] = float64(cum)
 		}
-		fmt.Println("累计 Token 曲线（每 5 分钟桶）：")
+		fmt.Println(i18n.Tr("Cumulative token curve (5-min buckets):", "累计 Token 曲线（每 5 分钟桶）："))
 		fmt.Println(chart.Line(vals, 60))
 		return nil
 	}
@@ -345,7 +345,7 @@ func showRateChart(ctx context.Context, db *index.DB, sess *model.Session, kind 
 		vals[i] = float64(b.TotalTokens) / 5.0
 		labels[i] = b.Start.Format("15:04")
 	}
-	fmt.Println("Token/分钟 柱状图（每 5 分钟桶）：")
+	fmt.Println(i18n.Tr("Tokens/min bar chart (5-min buckets):", "Token/分钟 柱状图（每 5 分钟桶）："))
 	fmt.Println(chart.Bar(vals, labels, 8))
 	return nil
 }
@@ -377,7 +377,9 @@ func showByModel(ctx context.Context, db *index.DB, sess *model.Session, outputF
 		}
 		return nil
 	default:
-		fmt.Fprintf(w, "%-24s  %-8s  %-10s  %-10s  %-10s\n", "模型", "请求", "输入", "输出", "总计")
+		fmt.Fprintf(w, "%-24s  %-8s  %-10s  %-10s  %-10s\n",
+			i18n.Tr("Model", "模型"), i18n.Tr("Requests", "请求"),
+			i18n.Tr("Input", "输入"), i18n.Tr("Output", "输出"), i18n.Tr("Total", "总计"))
 		for _, m := range sums {
 			fmt.Fprintf(w, "%-24s  %-8d  %-10s  %-10s  %-10s\n",
 				m.Model, m.Requests, human(m.InputTokens), human(m.OutputTokens), human(m.TotalTokens))
@@ -392,7 +394,7 @@ func showContext(ctx context.Context, db *index.DB, sess *model.Session, outputF
 		return err
 	}
 	if len(pts) == 0 {
-		fmt.Println("没有上下文窗口数据")
+		fmt.Println(i18n.Tr("no context window data", "没有上下文窗口数据"))
 		return nil
 	}
 	w := os.Stdout
@@ -405,27 +407,28 @@ func showContext(ctx context.Context, db *index.DB, sess *model.Session, outputF
 		w = f
 	}
 	comps, _ := timeline.DetectCompactions(ctx, db, sess.AgentInstanceID, sess.SessionID)
-	fmt.Fprintf(w, "上下文窗口曲线（%d 个采样点）：\n\n", len(pts))
-	fmt.Fprintf(w, "%-10s  %-10s  %-10s  %-12s\n", "时间", "上下文", "上限", "变化")
+	fmt.Fprintf(w, i18n.Tr("Context window curve (%d sample points):\n\n", "上下文窗口曲线（%d 个采样点）：\n\n"), len(pts))
+	fmt.Fprintf(w, "%-10s  %-10s  %-10s  %-12s\n",
+		i18n.Tr("Time", "时间"), i18n.Tr("Context", "上下文"), i18n.Tr("Limit", "上限"), i18n.Tr("Change", "变化"))
 	for _, p := range pts {
 		fmt.Fprintf(w, "%-10s  %-10s  %-10s  %+s\n",
 			time.Unix(p.Timestamp, 0).Format("15:04:05"),
 			human(p.Context), human(p.ContextLimit), signedHuman(p.Change))
 	}
 	if len(comps) > 0 {
-		fmt.Fprintln(w, "\n上下文压缩：")
+		fmt.Fprintln(w, "\n"+i18n.Tr("Context compaction:", "上下文压缩："))
 		for _, c := range comps {
-			label := "明确压缩"
+			label := i18n.Tr("explicit compaction", "明确压缩")
 			if c.IsInferred {
-				label = "可能发生上下文压缩"
+				label = i18n.Tr("possible compaction", "可能发生上下文压缩")
 			}
 			if c.Before > 0 && c.After > 0 {
-				fmt.Fprintf(w, "  %s：压缩前 %s，压缩后 %s，减少 %s，压缩率 %.1f%%（%s）\n",
+				fmt.Fprintf(w, i18n.Tr("  %s: before %s, after %s, reduced %s, ratio %.1f%% (%s)\n", "  %s：压缩前 %s，压缩后 %s，减少 %s，压缩率 %.1f%%（%s）\n"),
 					time.Unix(c.Timestamp, 0).Format("15:04:05"),
 					human(c.Before), human(c.After), human(c.Reduced), c.Ratio*100, label)
 			} else {
 				// 明确压缩事件但无前后数值（Agent 仅记录事件）
-				fmt.Fprintf(w, "  %s：（%s）\n", time.Unix(c.Timestamp, 0).Format("15:04:05"), label)
+				fmt.Fprintf(w, i18n.Tr("  %s: (%s)\n", "  %s：（%s）\n"), time.Unix(c.Timestamp, 0).Format("15:04:05"), label)
 			}
 		}
 	}
@@ -437,9 +440,9 @@ func showInsights(ctx context.Context, db *index.DB, sess *model.Session) error 
 	if err != nil {
 		return err
 	}
-	fmt.Println("会话 Token 洞察")
+	fmt.Println(i18n.Tr("Session token insights", "会话 Token 洞察"))
 	if len(rep.Insights) == 0 {
-		fmt.Println("未检测到明显异常消耗模式。")
+		fmt.Println(i18n.Tr("no obvious abnormal consumption patterns detected.", "未检测到明显异常消耗模式。"))
 		return nil
 	}
 	for _, ins := range rep.Insights {
@@ -459,18 +462,18 @@ func signedHuman(n int64) string {
 
 func optHuman(p *int64) string {
 	if p == nil {
-		return "未知"
+		return i18n.Tr("unknown", "未知")
 	}
 	return human(*p)
 }
 
 func truncModel(m string) string {
+	if m == "" {
+		return i18n.Tr("unknown", "未知")
+	}
 	r := []rune(m)
 	if len(r) > 14 {
 		return string(r[:13]) + "…"
-	}
-	if m == "" {
-		return "未知"
 	}
 	return m
 }
@@ -482,7 +485,7 @@ func writeBuckets(w io.Writer, ctx context.Context, db *index.DB, sess *model.Se
 		return err
 	}
 	if len(buckets) == 0 {
-		fmt.Fprintln(w, "没有可聚合的请求数据")
+		fmt.Fprintln(w, i18n.Tr("no aggregable request data", "没有可聚合的请求数据"))
 		return nil
 	}
 	if aroundPeak {
@@ -517,7 +520,9 @@ func writeBuckets(w io.Writer, ctx context.Context, db *index.DB, sess *model.Se
 		}
 		return nil
 	default:
-		fmt.Fprintf(w, "%-8s  %-8s  %-8s  %-10s  %-10s  %-10s\n", "开始", "结束", "请求", "输入", "输出", "总计")
+		fmt.Fprintf(w, "%-8s  %-8s  %-8s  %-10s  %-10s  %-10s\n",
+			i18n.Tr("Start", "开始"), i18n.Tr("End", "结束"), i18n.Tr("Requests", "请求"),
+			i18n.Tr("Input", "输入"), i18n.Tr("Output", "输出"), i18n.Tr("Total", "总计"))
 		for _, b := range buckets {
 			fmt.Fprintf(w, "%-8s  %-8s  %-8d  %-10s  %-10s  %-10s\n",
 				b.Start.Format("15:04"), b.End.Format("15:04"), b.Requests,
@@ -534,7 +539,7 @@ func newDoctorCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "doctor",
-		Short: "环境诊断",
+		Short: i18n.Tr("environment diagnostics", "环境诊断"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			a, err := app.New(ctx)
@@ -555,17 +560,17 @@ func newDoctorCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&jsonFlag, "json", false, "JSON 输出")
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "仅诊断指定 Agent")
+	cmd.Flags().BoolVar(&jsonFlag, "json", false, i18n.Tr("JSON output", "JSON 输出"))
+	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("diagnose only the given agent", "仅诊断指定 Agent"))
 	return cmd
 }
 
 func printUsage(label string, v *int64) {
 	if v == nil {
-		fmt.Printf("%s：未知\n", label)
+		fmt.Printf(i18n.Tr("%s: unknown\n", "%s：未知\n"), label)
 		return
 	}
-	fmt.Printf("%s：%s\n", label, human(*v))
+	fmt.Printf(i18n.Tr("%s: %s\n", "%s：%s\n"), label, human(*v))
 }
 
 func human(n int64) string {
@@ -582,19 +587,19 @@ func human(n int64) string {
 func describeEvent(e timeline.Event) string {
 	var parts []string
 	if e.TotalTokens != nil {
-		parts = append(parts, fmt.Sprintf("总计 %s", human(*e.TotalTokens)))
+		parts = append(parts, i18n.Trf("total %s", "总计 %s", human(*e.TotalTokens)))
 	}
 	if e.InputTokens != nil {
-		parts = append(parts, fmt.Sprintf("输入 %s", human(*e.InputTokens)))
+		parts = append(parts, i18n.Trf("input %s", "输入 %s", human(*e.InputTokens)))
 	}
 	if e.OutputTokens != nil {
-		parts = append(parts, fmt.Sprintf("输出 %s", human(*e.OutputTokens)))
+		parts = append(parts, i18n.Trf("output %s", "输出 %s", human(*e.OutputTokens)))
 	}
 	if e.ContextAfter != nil {
-		parts = append(parts, fmt.Sprintf("上下文 %s", human(*e.ContextAfter)))
+		parts = append(parts, i18n.Trf("context %s", "上下文 %s", human(*e.ContextAfter)))
 	}
 	if e.ToolName != "" {
-		parts = append(parts, "工具 "+e.ToolName)
+		parts = append(parts, i18n.Tr("tool ", "工具 ")+e.ToolName)
 	}
 	if e.UserPromptPreview != "" {
 		parts = append(parts, preview(e.UserPromptPreview))
@@ -604,7 +609,7 @@ func describeEvent(e timeline.Event) string {
 
 func fmtTS(t *time.Time) string {
 	if t == nil {
-		return "未知"
+		return i18n.Tr("unknown", "未知")
 	}
 	return t.Format("15:04:05")
 }
@@ -655,7 +660,9 @@ func writeEvents(w io.Writer, events []timeline.Event, format output.Format) err
 		}
 		return nil
 	case output.FormatMarkdown:
-		fmt.Fprintf(w, "| 时间 | 类型 | 模型 | 总计 | 输入 | 输出 | 推理 |\n")
+		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s |\n",
+			i18n.Tr("Time", "时间"), i18n.Tr("Type", "类型"), i18n.Tr("Model", "模型"),
+			i18n.Tr("Total", "总计"), i18n.Tr("Input", "输入"), i18n.Tr("Output", "输出"), i18n.Tr("Reasoning", "推理"))
 		fmt.Fprintf(w, "|------|------|------|------|------|------|------|\n")
 		for _, e := range events {
 			fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s |\n",
@@ -699,7 +706,8 @@ func writeTurns(w io.Writer, turns []timeline.TurnUsage, format output.Format) e
 		return nil
 	default:
 		fmt.Fprintf(w, "%-5s  %-40s  %-8s  %-6s  %-6s  %s\n",
-			"轮次", "提问", "请求", "工具", "Token", "")
+			i18n.Tr("Turn", "轮次"), i18n.Tr("Question", "提问"), i18n.Tr("Requests", "请求"),
+			i18n.Tr("Tools", "工具"), i18n.Tr("Token", "Token"), "")
 		for _, t := range turns {
 			fmt.Fprintf(w, "%-5d  %-40s  %-8d  %-6d  %s\n",
 				t.Index, preview(t.Prompt), t.Requests, 0, human(t.Total))
