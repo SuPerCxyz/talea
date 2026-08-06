@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
@@ -197,33 +198,68 @@ func sessionTitle(s *model.Session) string {
 }
 
 func sessionDesc(s *model.Session) string {
-	var segs []string
+	type seg struct {
+		key   string
+		value string
+		valW  int // 值右对齐宽度（0 不限制）
+	}
+	var segs []seg
 	if s.StartedAt != nil {
-		segs = append(segs, "开始 "+s.StartedAt.Format("01-02 15:04"))
+		segs = append(segs, seg{"开始", s.StartedAt.Format("01-02 15:04"), 11})
 	}
 	if s.EndedAt != nil {
-		segs = append(segs, "结束 "+s.EndedAt.Format("01-02 15:04"))
+		segs = append(segs, seg{"结束", s.EndedAt.Format("01-02 15:04"), 11})
 	}
 	if s.Duration != nil {
-		segs = append(segs, "时长 "+humanDur(*s.Duration))
+		segs = append(segs, seg{"时长", humanDur(*s.Duration), 7})
 	}
 	if s.TokenUsage != nil && s.TokenUsage.TotalTokens != nil {
-		segs = append(segs, "Token "+humanNum(*s.TokenUsage.TotalTokens))
+		segs = append(segs, seg{"Token", humanNum(*s.TokenUsage.TotalTokens), 8})
 	}
 	if s.WorkingDirectory != "" {
-		segs = append(segs, "目录 "+shortHome(s.WorkingDirectory))
+		segs = append(segs, seg{"目录", shortHome(s.WorkingDirectory), 0})
 	}
 	if s.GitBranch != "" {
-		segs = append(segs, "分支 "+s.GitBranch)
+		segs = append(segs, seg{"分支", s.GitBranch, 0})
 	}
 	if s.Activity == model.ActivityActive {
-		segs = append(segs, "进行中")
+		segs = append(segs, seg{"状态", "进行中", 0})
 	}
 	if len(segs) == 0 {
 		return s.SessionID
 	}
-	// key 与值紧凑排列，段间 2 空格分隔
-	return strings.Join(segs, "  ")
+	// key 固定 6 显示宽（左对齐），时长/Token/时间值右对齐固定宽，
+	// 保证各段起点跨行对齐且 key 贴近值
+	const keyW = 6
+	var sb strings.Builder
+	for i, g := range segs {
+		if i > 0 {
+			sb.WriteString("  ")
+		}
+		sb.WriteString(padDisplay(g.key+" ", keyW))
+		if g.valW > 0 {
+			sb.WriteString(padLeft(g.value, g.valW))
+		} else {
+			sb.WriteString(g.value)
+		}
+	}
+	return sb.String()
+}
+
+// padDisplay 左对齐填充到指定显示宽度。
+func padDisplay(s string, w int) string {
+	if runewidth.StringWidth(s) >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-runewidth.StringWidth(s))
+}
+
+// padLeft 右对齐填充到指定显示宽度。
+func padLeft(s string, w int) string {
+	if runewidth.StringWidth(s) >= w {
+		return s
+	}
+	return strings.Repeat(" ", w-runewidth.StringWidth(s)) + s
 }
 
 func displayAgent(a model.AgentID) string {
@@ -328,7 +364,14 @@ func (m *mainModel) View() string {
 	return sb.String()
 }
 
-// doResumeDetail 进入详情页。
+// showDetail 进入详情页。
 func (m *mainModel) showDetail(s *model.Session) {
-	m.detail = &detailModel{ctx: m.ctx, app: m.app, db: m.db, sess: s}
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 100
+	}
+	if h <= 0 {
+		h = 30
+	}
+	m.detail = &detailModel{ctx: m.ctx, app: m.app, db: m.db, sess: s, width: w, height: h - 2}
 }

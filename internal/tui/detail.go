@@ -26,13 +26,15 @@ var (
 
 // detailModel 是会话详情视图。
 type detailModel struct {
-	ctx   context.Context
-	app   *app.App
-	db    *index.DB
-	sess  *model.Session
-	view  viewport.Model
-	ready bool
-	tab   string // "" 详情, "timeline", "context", "model", "preview"
+	ctx    context.Context
+	app    *app.App
+	db     *index.DB
+	sess   *model.Session
+	view   viewport.Model
+	ready  bool
+	tab    string // "" 详情, "timeline", "context", "model", "preview"
+	width  int
+	height int
 }
 
 // render 渲染当前 tab 内容。
@@ -410,7 +412,14 @@ func (d *detailModel) renderDetail() string {
 // View 渲染详情视图。
 func (d *detailModel) View() string {
 	if !d.ready {
-		d.view = viewport.New(0, 0)
+		w, h := d.width, d.height
+		if w <= 0 {
+			w = 100
+		}
+		if h <= 0 {
+			h = 30
+		}
+		d.view = viewport.New(w, h)
 		d.ready = true
 	}
 	d.view.SetContent(d.render())
