@@ -26,12 +26,13 @@ import (
 func newGoCmd() *cobra.Command {
 	var (
 		cwdFlag    string
+		dirFlag    string
 		dryRunFlag bool
 	)
 	cmd := &cobra.Command{
 		Use:   "go [session-id]",
 		Short: i18n.Tr("pick a session by ID (full or prefix) and resume it", "按会话 ID（完整或前缀）选择并进入"),
-		Long:  i18n.Tr("With a session ID, resumes it directly; the ID may be a full or partial prefix and is matched automatically. If the prefix is ambiguous, lists matching sessions. Without a session ID, opens an interactive table picker; select and press Enter to resume.", "带会话 ID 时直接恢复，ID 可为完整或前缀片段并自动匹配；前缀有歧义时列出候选。不带会话 ID 时进入交互式表格选择器，选中后 Enter 恢复。"),
+		Long:  i18n.Tr("With a session ID, resumes it directly; the ID may be a full or partial prefix and is matched automatically. If the prefix is ambiguous, lists matching sessions. Without a session ID, opens an interactive table picker; select and press Enter to resume. Use --dir to restrict the picker to sessions under a directory.", "带会话 ID 时直接恢复，ID 可为完整或前缀片段并自动匹配；前缀有歧义时列出候选。不带会话 ID 时进入交互式表格选择器，选中后 Enter 恢复。可用 --dir 将选择器限定为指定目录下的会话。"),
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -49,10 +50,11 @@ func newGoCmd() *cobra.Command {
 			if !isTTY(os.Stdin) {
 				return exitError{code: ExitUsage, msg: i18n.Tr("interactive picker needs a terminal; specify a session ID: talea go <session-id>", "交互式选择需要终端，请指定会话 ID：talea go <session-id>")}
 			}
-			return goSelect(ctx, a)
+			return goSelect(ctx, a, dirFlag)
 		},
 	}
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("target directory (override original)", "目标目录（覆盖原目录）"))
+	cmd.Flags().StringVar(&dirFlag, "dir", "", i18n.Tr("filter picker to sessions under this directory", "仅列出该目录下的会话"))
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, i18n.Tr("print resume command only", "仅打印恢复命令"))
 	return cmd
 }
@@ -80,32 +82,48 @@ func (k goKeys) FullHelp() [][]key.Binding {
 	return [][]key.Binding{{k.Enter, k.Quit}}
 }
 
-// goSelect 启动交互式选择器，选中后恢复会话。
-func goSelect(ctx context.Context, a *app.App) error {
+// loadGoSessions 加载交互选择器候选会话，dir 非空时仅保留该目录前缀下的会话，
+// 并按会话结束时间降序排序（最新结束在前）。
+func loadGoSessions(ctx context.Context, a *app.App, dir string) ([]*model.Session, error) {
 	db, err := index.Open(a.Paths.DBPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer db.Close()
 	if err := db.Migrate(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	if err := autoIndex(ctx, a, db); err != nil {
-		return err
+		return nil, err
 	}
-	results, err := search.List(ctx, db, search.Query{Limit: 200})
+	return queryGoSessions(ctx, db, dir)
+}
+
+// queryGoSessions 从索引查询选择器候选会话，dir 非空时仅保留该目录前缀下的会话，
+// 并按会话结束时间降序排序（最新结束在前）。
+func queryGoSessions(ctx context.Context, db *index.DB, dir string) ([]*model.Session, error) {
+	results, err := search.List(ctx, db, search.Query{Cwd: dir, Limit: 200})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sessions := make([]*model.Session, 0, len(results))
 	for i := range results {
 		sessions = append(sessions, &results[i].Session)
 	}
-	a.ResolveWorkingDirs(ctx, sessions)
-	// 选择器按会话结束时间降序排序（最新结束在前）
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return endTs(sessions[i]) > endTs(sessions[j])
 	})
+	return sessions, nil
+}
+
+// goSelect 启动交互式选择器，选中后恢复会话。
+// dir 非空时仅列出该目录前缀下的会话。
+func goSelect(ctx context.Context, a *app.App, dir string) error {
+	sessions, err := loadGoSessions(ctx, a, dir)
+	if err != nil {
+		return err
+	}
+	a.ResolveWorkingDirs(ctx, sessions)
 
 	m := newGoModel(ctx, a, sessions)
 	// alt screen：界面全屏且退出时自动恢复终端，避免残留

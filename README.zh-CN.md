@@ -90,6 +90,9 @@ talea list
 # 按完整或前缀会话 ID 恢复（--dry-run 预览命令）
 talea go <session-id> --dry-run
 talea go <session-id>
+
+# 交互式选择会话，限定在指定目录子树内
+talea go --dir /home/user/myproject
 ```
 
 ## TUI 界面
@@ -111,7 +114,7 @@ talea          # 会话列表（最近 500 条）
 | `talea` | 打开 TUI |
 | `talea list` | 列出会话（`--agent/--cwd/--project/--branch/--today/--active/--sort/--limit/--format`） |
 | `talea search <关键词>` | 跨 Agent 全文搜索（`--agent/--cwd/--since/--format`） |
-| `talea go [session-id]` | 按完整/前缀 ID 恢复，或交互式选择（`--cwd/--dry-run`） |
+| `talea go [session-id]` | 按完整/前缀 ID 恢复，或交互式选择（`--cwd/--dir/--dry-run`） |
 | `talea last` | 当前目录最近会话 |
 | `talea index` | 增量索引（`--rebuild/--metadata-only`） |
 | `talea usage <id>` | Token 汇总（`--details/--include-subagents/--metrics`） |

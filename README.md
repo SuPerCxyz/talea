@@ -93,6 +93,9 @@ talea list
 # Resume a session by full or partial ID (dry run to preview the command)
 talea go <session-id> --dry-run
 talea go <session-id>
+
+# Interactively pick a session, restricted to a directory subtree
+talea go --dir /home/user/myproject
 ```
 
 ## TUI
@@ -116,7 +119,7 @@ talea          # session list (most recent 500)
 | `talea` | Open the TUI |
 | `talea list` | List sessions (`--agent/--cwd/--project/--branch/--today/--active/--sort/--limit/--format`) |
 | `talea search <keyword>` | Full-text search across agents (`--agent/--cwd/--since/--format`) |
-| `talea go [session-id]` | Resume a session by full/prefix ID, or pick interactively (`--cwd/--dry-run`) |
+| `talea go [session-id]` | Resume a session by full/prefix ID, or pick interactively (`--cwd/--dir/--dry-run`) |
 | `talea last` | Recent session in the current directory |
 | `talea index` | Incremental index (`--rebuild/--metadata-only`) |
 | `talea usage <id>` | Token usage summary (`--details/--include-subagents/--metrics`) |
