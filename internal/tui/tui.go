@@ -29,8 +29,24 @@ var (
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 )
 
+// loadTuiSessions 加载 TUI 会话列表，dir 非空时仅保留该目录前缀下的会话。
+func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) ([]*model.Session, error) {
+	results, err := search.List(ctx, db, search.Query{Cwd: dir, Limit: 500})
+	if err != nil {
+		return nil, err
+	}
+	sessions := make([]*model.Session, 0, len(results))
+	for i := range results {
+		sessions = append(sessions, &results[i].Session)
+	}
+	a.ResolveWorkingDirs(ctx, sessions)
+	a.SortSessions(sessions)
+	return sessions, nil
+}
+
 // Run 启动 TUI。
-func Run(ctx context.Context) error {
+// dir 非空时仅列出该目录前缀下的会话。
+func Run(ctx context.Context, dir string) error {
 	a, err := app.New(ctx)
 	if err != nil {
 		return err
@@ -50,18 +66,12 @@ func Run(ctx context.Context) error {
 	if err := search.Populate(ctx, db); err != nil {
 		return err
 	}
-	results, err := search.List(ctx, db, search.Query{Limit: 500})
+	sessions, err := loadTuiSessions(ctx, a, db, dir)
 	if err != nil {
 		return err
 	}
-	var sessions []*model.Session
-	for i := range results {
-		sessions = append(sessions, &results[i].Session)
-	}
-	a.ResolveWorkingDirs(ctx, sessions)
-	a.SortSessions(sessions)
 
-	m := newMain(ctx, a, sessions, db)
+	m := newMain(ctx, a, sessions, db, dir)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	// TUI 已退出并恢复终端，此时再恢复会话，避免在 alt screen 内
@@ -110,6 +120,7 @@ type mainModel struct {
 	ctx      context.Context
 	app      *app.App
 	db       *index.DB
+	dir      string
 	sessions []*model.Session
 	list     list.Model
 	detail   *detailModel
@@ -151,7 +162,7 @@ func (i item) FilterValue() string {
 	return i.sess.FirstQuestion + " " + string(i.sess.AgentID) + " " + i.sess.SessionID
 }
 
-func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *index.DB) *mainModel {
+func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *index.DB, dir string) *mainModel {
 	items := itemsOf(sessions)
 	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Talea · Agent Sessions"
@@ -170,6 +181,7 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *ind
 		ctx:      ctx,
 		app:      a,
 		db:       db,
+		dir:      dir,
 		sessions: sessions,
 		list:     l,
 		keys:     km,
@@ -329,16 +341,10 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			return m, nil
 		}
-		results, err := search.List(m.ctx, m.db, search.Query{Limit: 500})
+		sessions, err := loadTuiSessions(m.ctx, m.app, m.db, m.dir)
 		if err != nil {
 			return m, nil
 		}
-		sessions := make([]*model.Session, 0, len(results))
-		for i := range results {
-			sessions = append(sessions, &results[i].Session)
-		}
-		m.app.ResolveWorkingDirs(m.ctx, sessions)
-		m.app.SortSessions(sessions)
 		sel := ""
 		if it, ok := m.list.SelectedItem().(item); ok {
 			sel = it.sess.SessionID

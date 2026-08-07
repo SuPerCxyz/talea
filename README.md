@@ -102,6 +102,7 @@ talea go --dir /home/user/myproject
 
 ```text
 talea          # session list (most recent 500)
+talea --dir /path   # restrict the list to sessions under /path
 ```
 
 - `↑` / `↓` select, `Enter` resume, `d` open details, `o` resume from details,
@@ -116,7 +117,7 @@ talea          # session list (most recent 500)
 
 | Command | Description |
 |---------|-------------|
-| `talea` | Open the TUI |
+| `talea` | Open the TUI (`--dir` restricts the list to a directory subtree) |
 | `talea list` | List sessions (`--agent/--cwd/--project/--branch/--today/--active/--sort/--limit/--format`) |
 | `talea search <keyword>` | Full-text search across agents (`--agent/--cwd/--since/--format`) |
 | `talea go [session-id]` | Resume a session by full/prefix ID, or pick interactively (`--cwd/--dir/--dry-run`) |

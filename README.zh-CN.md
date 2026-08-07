@@ -99,6 +99,7 @@ talea go --dir /home/user/myproject
 
 ```text
 talea          # 会话列表（最近 500 条）
+talea --dir /path   # 仅列出 /path 目录下的会话
 ```
 
 - `↑` / `↓` 选择，`Enter` 恢复，`d` 详情，`o` 在详情页恢复，`/` 过滤，`q` 退出。
@@ -111,7 +112,7 @@ talea          # 会话列表（最近 500 条）
 
 | 命令 | 说明 |
 |------|------|
-| `talea` | 打开 TUI |
+| `talea` | 打开 TUI（`--dir` 限定为指定目录下的会话） |
 | `talea list` | 列出会话（`--agent/--cwd/--project/--branch/--today/--active/--sort/--limit/--format`） |
 | `talea search <关键词>` | 跨 Agent 全文搜索（`--agent/--cwd/--since/--format`） |
 | `talea go [session-id]` | 按完整/前缀 ID 恢复，或交互式选择（`--cwd/--dir/--dry-run`） |

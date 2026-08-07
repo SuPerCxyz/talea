@@ -47,6 +47,7 @@ func Execute() int {
 
 // NewRootCmd 构建根命令。
 func NewRootCmd() *cobra.Command {
+	var dirFlag string
 	root := &cobra.Command{
 		Use:     "talea",
 		Short:   "Trace the session. Resume the work.",
@@ -55,10 +56,11 @@ func NewRootCmd() *cobra.Command {
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 无子命令时打开 TUI
-			return tui.Run(cmd.Context())
+			return tui.Run(cmd.Context(), dirFlag)
 		},
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
+	root.Flags().StringVar(&dirFlag, "dir", "", i18n.Tr("filter sessions under this directory (TUI)", "仅列出该目录下的会话（TUI）"))
 	root.AddCommand(newListCmd())
 	root.AddCommand(newSearchCmd())
 	root.AddCommand(newGoCmd())
