@@ -60,7 +60,7 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
-	root.Flags().StringVar(&dirFlag, "dir", "", i18n.Tr("filter sessions under this directory (TUI)", "仅列出该目录下的会话（TUI）"))
+	root.Flags().StringVarP(&dirFlag, "dir", "d", "", i18n.Tr("filter sessions under this directory (TUI)", "仅列出该目录下的会话（TUI）"))
 	root.AddCommand(newListCmd())
 	root.AddCommand(newSearchCmd())
 	root.AddCommand(newGoCmd())

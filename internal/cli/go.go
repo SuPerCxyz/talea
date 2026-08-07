@@ -54,7 +54,7 @@ func newGoCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("target directory (override original)", "目标目录（覆盖原目录）"))
-	cmd.Flags().StringVar(&dirFlag, "dir", "", i18n.Tr("filter picker to sessions under this directory", "仅列出该目录下的会话"))
+	cmd.Flags().StringVarP(&dirFlag, "dir", "d", "", i18n.Tr("filter picker to sessions under this directory", "仅列出该目录下的会话"))
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, i18n.Tr("print resume command only", "仅打印恢复命令"))
 	return cmd
 }
