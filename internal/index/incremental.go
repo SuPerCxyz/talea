@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/talea/talea/internal/model"
@@ -61,20 +62,22 @@ func (db *DB) UpsertMany(ctx context.Context, sessions []*model.Session) (Increm
 	// 预加载已存在会话键，避免逐条 SELECT EXISTS（N+1 查询）
 	existing := make(map[string]bool, len(sessions))
 	if len(sessions) > 0 {
-		keys := make([]string, 0, len(sessions))
-		instIDs := make([]string, 0, len(sessions))
-		sesIDs := make([]string, 0, len(sessions))
-		for _, s := range sessions {
-			instIDs = append(instIDs, s.AgentInstanceID)
-			sesIDs = append(sesIDs, s.SessionID)
-			keys = append(keys, s.AgentInstanceID+"\x00"+s.SessionID)
+		// 使用 (instance_id, session_id) 元组 IN 查询，避免交叉匹配
+		var placeholders strings.Builder
+		placeholders.WriteString("(")
+		args := make([]any, 0, len(sessions)*2)
+		for i, s := range sessions {
+			if i > 0 {
+				placeholders.WriteString(",")
+			}
+			placeholders.WriteString("(?,?)")
+			args = append(args, s.AgentInstanceID, s.SessionID)
 		}
-		// 单查询批量检查存在性
+		placeholders.WriteString(")")
 		rows, err := tx.QueryContext(ctx,
 			`SELECT agent_instance_id, session_id FROM sessions
-			 WHERE agent_instance_id IN (`+placeholders(len(instIDs))+`)
-			   AND session_id IN (`+placeholders(len(sesIDs))+`)`,
-			toArgs(instIDs, sesIDs)...)
+			 WHERE (agent_instance_id, session_id) IN `+placeholders.String(),
+			args...)
 		if err == nil {
 			for rows.Next() {
 				var iid, sid string
@@ -238,28 +241,4 @@ func (db *DB) Count(ctx context.Context) (int, error) {
 	var n int
 	err := db.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&n)
 	return n, err
-}
-
-// placeholders 返回 n 个 ? 用逗号分隔。
-func placeholders(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	out := make([]byte, 0, n*2)
-	out = append(out, '?')
-	for i := 1; i < n; i++ {
-		out = append(out, ',', '?')
-	}
-	return string(out)
-}
-
-// toArgs 将多个切片拼接为 []any。
-func toArgs(slices ...[]string) []any {
-	var out []any
-	for _, s := range slices {
-		for _, v := range s {
-			out = append(out, v)
-		}
-	}
-	return out
 }

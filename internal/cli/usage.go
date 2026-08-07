@@ -59,11 +59,14 @@ func newUsageCmd() *cobra.Command {
 			if metricsFlag {
 				return showMetrics(ctx, db, sess)
 			}
-			u, err := usage.Load(ctx, db, sess.AgentInstanceID, sess.SessionID)
-			if err != nil || u == nil {
-				fmt.Println(i18n.Tr("this agent session format has no token usage data", "当前 Agent 会话格式未提供 Token 使用数据"))
-				return nil
-			}
+		u, err := usage.Load(ctx, db, sess.AgentInstanceID, sess.SessionID)
+		if err != nil {
+			return fmt.Errorf(i18n.Tr("load token usage: %w", "加载 Token 用量：%w"), err)
+		}
+		if u == nil {
+			fmt.Println(i18n.Tr("this agent session format has no token usage data", "当前 Agent 会话格式未提供 Token 使用数据"))
+			return nil
+		}
 
 			fmt.Printf("%s %s\n", i18n.Tr("Session:", "会话："), sess.SessionID)
 			fmt.Printf("%s %s\n", i18n.Tr("Agent:", "Agent："), sess.AgentID)

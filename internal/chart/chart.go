@@ -57,7 +57,12 @@ func bar(values []float64, labels []string, height, maxCols int) string {
 	var sb strings.Builder
 	// 顶部到低的柱（r=0 顶，r=height-1 底）
 	for r := 0; r < height; r++ {
-		frac := float64(height-1-r) / float64(height-1)
+		var frac float64
+		if height > 1 {
+			frac = float64(height-1-r) / float64(height-1)
+		} else {
+			frac = 0 // height==1 时只有底行，所有值都显示
+		}
 		threshold := maxV * frac
 		sb.WriteString(axisLabel(r, height, maxV, yWidth))
 		for _, v := range values {

@@ -50,7 +50,7 @@ func newGoCmd() *cobra.Command {
 			if !isTTY(os.Stdin) {
 				return exitError{code: ExitUsage, msg: i18n.Tr("interactive picker needs a terminal; specify a session ID: talea go <session-id>", "交互式选择需要终端，请指定会话 ID：talea go <session-id>")}
 			}
-			return goSelect(ctx, a, dirFlag)
+			return goSelect(ctx, a, dirFlag, cwdFlag, dryRunFlag)
 		},
 	}
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("target directory (override original)", "目标目录（覆盖原目录）"))
@@ -118,7 +118,8 @@ func queryGoSessions(ctx context.Context, db *index.DB, dir string) ([]*model.Se
 
 // goSelect 启动交互式选择器，选中后恢复会话。
 // dir 非空时仅列出该目录前缀下的会话。
-func goSelect(ctx context.Context, a *app.App, dir string) error {
+// cwd 非空时覆盖目标目录；dryRun 为 true 时仅打印恢复命令。
+func goSelect(ctx context.Context, a *app.App, dir, cwd string, dryRun bool) error {
 	sessions, err := loadGoSessions(ctx, a, dir)
 	if err != nil {
 		return err
@@ -133,7 +134,7 @@ func goSelect(ctx context.Context, a *app.App, dir string) error {
 	}
 	// Bubble Tea 已退出并恢复终端，此时执行选中会话的恢复
 	if m.picked >= 0 && m.picked < len(m.sess) {
-		return resumeSession(ctx, a, m.sess[m.picked], "", false)
+		return resumeSession(ctx, a, m.sess[m.picked], cwd, dryRun)
 	}
 	return nil
 }

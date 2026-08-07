@@ -196,7 +196,14 @@ func sessionIDOf(src adapters.SessionSource) string {
 
 // questionFromLine 从 user 消息提取首次提问。
 func questionFromLine(l *line) (string, bool) {
-	return extractTextFromContent(l.Message, true), len(l.Message) > 0 && l.Type == "user"
+	if len(l.Message) == 0 || l.Type != "user" {
+		return "", false
+	}
+	q := extractTextFromContent(l.Message, true)
+	if q == "" {
+		return "", false
+	}
+	return q, true
 }
 
 // messageText 从消息 content 字段提取纯文本。

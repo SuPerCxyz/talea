@@ -69,17 +69,19 @@ func newListCmd() *cobra.Command {
 			for i := range results {
 				sessions = append(sessions, &results[i].Session)
 			}
-			if sortFlag != "" {
-				a.Config.General.DefaultSort = sortFlag
-			}
-			if a.Config.General.DefaultSort == "" || a.Config.General.DefaultSort == "last_activity" {
-				// 默认按会话结束时间降序（与 talea go 一致）
-				sort.SliceStable(sessions, func(i, j int) bool {
-					return endTs(sessions[i]) > endTs(sessions[j])
-				})
-			} else {
-				a.SortSessions(sessions)
-			}
+		effectiveSort := sortFlag
+		if effectiveSort == "" {
+			effectiveSort = a.Config.General.DefaultSort
+		}
+		if effectiveSort == "" || effectiveSort == "last_activity" {
+			// 默认按会话结束时间降序（与 talea go 一致）
+			sort.SliceStable(sessions, func(i, j int) bool {
+				return endTs(sessions[i]) > endTs(sessions[j])
+			})
+		} else {
+			a.Config.General.DefaultSort = effectiveSort
+			a.SortSessions(sessions)
+		}
 			if !includeSubagents {
 				filtered := sessions[:0]
 				for _, s := range sessions {
