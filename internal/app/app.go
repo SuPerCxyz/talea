@@ -69,7 +69,9 @@ func registerPlugins(ctx context.Context, reg *adapters.Registry) {
 func (a *App) DetectInstances(ctx context.Context) ([]model.AgentInstance, error) {
 	a.detectMu.Lock()
 	if a.detectCache != nil && time.Since(a.detectAt) < 5*time.Second {
-		out := a.detectCache
+		// 返回副本，避免调用方修改缓存
+		out := make([]model.AgentInstance, len(a.detectCache))
+		copy(out, a.detectCache)
 		a.detectMu.Unlock()
 		return out, nil
 	}

@@ -192,9 +192,24 @@ func (ix *Indexer) ResolveSubagentRelations(ctx context.Context) (int, error) {
 		if err != nil {
 			continue
 		}
+		// 按父会话分组，聚合所有子会话 token 后一次性写入（幂等）
+		parentChildren := map[string][]model.SessionRelation{}
 		for _, rel := range rels {
-			if err := ix.DB.AggregateChildTokens(ctx, rel); err == nil {
-				count++
+			key := rel.ParentAgentInstanceID + "\x00" + rel.ParentSessionID
+			parentChildren[key] = append(parentChildren[key], rel)
+		}
+		for _, rels := range parentChildren {
+			var sum int64
+			for _, rel := range rels {
+				if t, err := ix.DB.GetChildTotalTokens(ctx, rel.ChildAgentInstanceID, rel.ChildSessionID); err == nil {
+					sum += t
+				}
+			}
+			if sum > 0 {
+				parent := rels[0]
+				if err := ix.DB.SetChildTokens(ctx, parent.ParentAgentInstanceID, parent.ParentSessionID, sum); err == nil {
+					count += len(rels)
+				}
 			}
 		}
 	}

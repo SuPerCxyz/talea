@@ -251,6 +251,39 @@ func (db *DB) backupIfVersionChange(ctx context.Context) error {
 	return nil
 }
 
+// InsertIfNew 插入新会话，已存在则跳过（INSERT OR IGNORE 语义）。
+// 返回 (true, nil) 表示实际插入，(false, nil) 表示已存在跳过。
+func (db *DB) InsertIfNew(ctx context.Context, s *model.Session) (bool, error) {
+	res, err := db.sql.ExecContext(ctx, `
+		INSERT OR IGNORE INTO sessions (
+			agent_id, agent_instance_id, session_id, format_name, format_version,
+			first_question, first_question_source, first_question_confidence,
+			started_at, ended_at, last_activity_at, duration_seconds,
+			start_time_source, end_time_source,
+			working_directory, working_dir_source, working_dir_exists,
+			project_name, git_root, git_branch, git_remote,
+			message_count, user_message_count, tool_call_count,
+			parent_session_id, is_subagent, activity_state,
+			source_path, source_id, source_mtime, source_size, source_offset,
+			has_token_usage, indexed_at, updated_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		s.AgentID, s.AgentInstanceID, s.SessionID, s.FormatName, s.FormatVersion,
+		s.FirstQuestion, s.FirstQuestionSource, s.FirstQuestionConfidence,
+		toEpoch(s.StartedAt), toEpoch(s.EndedAt), toEpoch(s.LastActivityAt), durSeconds(s.Duration),
+		s.StartTimeSource, s.EndTimeSource,
+		s.WorkingDirectory, s.WorkingDirSource, boolInt(s.WorkingDirExists),
+		s.ProjectName, s.GitRoot, s.GitBranch, s.GitRemote,
+		s.MessageCount, s.UserMessageCount, s.ToolCallCount,
+		s.ParentSessionID, boolInt(s.IsSubagent), string(s.Activity),
+		s.SourcePath, s.SourceID, s.SourceMtime, s.SourceSize, s.SourceOffset,
+		boolInt(s.HasTokenUsage), time.Now().Unix(), time.Now().Unix())
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // UpsertSession 写入或更新会话。调用方负责在事务内使用（或直接调用）。
 func (db *DB) UpsertSession(ctx context.Context, s *model.Session) error {
 	_, err := db.sql.ExecContext(ctx, `
@@ -457,24 +490,28 @@ func ptrOrNil(p *int64) any {
 	return *p
 }
 
-// AggregateChildTokens 将子会话总 Token 聚合到父会话的
-// direct_child_tokens / descendant_tokens。返回是否更新。
-// 使用直接赋值（非累加），保证幂等：重复调用不会重复增加。
-func (db *DB) AggregateChildTokens(ctx context.Context, rel model.SessionRelation) error {
-	var childTotal sql.NullInt64
+// GetChildTotalTokens 返回子会话的 total_tokens（无 usage 时返回 0, nil）。
+func (db *DB) GetChildTotalTokens(ctx context.Context, childInstanceID, childSessionID string) (int64, error) {
+	var total sql.NullInt64
 	err := db.sql.QueryRowContext(ctx,
 		`SELECT total_tokens FROM session_usage WHERE agent_instance_id=? AND session_id=?`,
-		rel.ChildAgentInstanceID, rel.ChildSessionID).Scan(&childTotal)
+		childInstanceID, childSessionID).Scan(&total)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil // 子会话无 usage，跳过
+			return 0, nil
 		}
-		return err
+		return 0, err
 	}
-	if !childTotal.Valid {
-		return nil
+	if !total.Valid {
+		return 0, nil
 	}
-	_, err = db.sql.ExecContext(ctx, `
+	return total.Int64, nil
+}
+
+// SetChildTokens 设置父会话的 direct_child_tokens / descendant_tokens。
+// 使用直接赋值（非累加），保证幂等：重复调用不会重复增加。
+func (db *DB) SetChildTokens(ctx context.Context, parentInstanceID, parentSessionID string, total int64) error {
+	_, err := db.sql.ExecContext(ctx, `
 		INSERT INTO session_usage (
 			agent_instance_id, session_id, direct_child_tokens, descendant_tokens, updated_at
 		) VALUES (?,?,?,?,?)
@@ -482,9 +519,23 @@ func (db *DB) AggregateChildTokens(ctx context.Context, rel model.SessionRelatio
 			direct_child_tokens = excluded.direct_child_tokens,
 			descendant_tokens = excluded.descendant_tokens,
 			updated_at = excluded.updated_at`,
-		rel.ParentAgentInstanceID, rel.ParentSessionID,
-		childTotal.Int64, childTotal.Int64, time.Now().Unix())
+		parentInstanceID, parentSessionID,
+		total, total, time.Now().Unix())
 	return err
+}
+
+// AggregateChildTokens 将子会话总 Token 聚合到父会话的
+// direct_child_tokens / descendant_tokens。
+// 注意：此方法在多子会话场景下会覆盖而非累加，建议使用 SetChildTokens + GetChildTotalTokens。
+func (db *DB) AggregateChildTokens(ctx context.Context, rel model.SessionRelation) error {
+	total, err := db.GetChildTotalTokens(ctx, rel.ChildAgentInstanceID, rel.ChildSessionID)
+	if err != nil {
+		return err
+	}
+	if total == 0 {
+		return nil
+	}
+	return db.SetChildTokens(ctx, rel.ParentAgentInstanceID, rel.ParentSessionID, total)
 }
 
 // ClearTimelineEvents 清除会话的时间线事件（用于全量重建）。
