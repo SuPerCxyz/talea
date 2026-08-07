@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -47,7 +48,7 @@ func Open(path string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("打开索引 %s: %w", path, err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	if err := os.Chmod(path, 0o600); err != nil && runtime.GOOS != "windows" {
 		sqlDB.Close()
 		return nil, fmt.Errorf("设置索引权限 0600: %w", err)
 	}
@@ -241,7 +242,7 @@ func (db *DB) backupIfVersionChange(ctx context.Context) error {
 	if _, err := db.sql.ExecContext(ctx, `VACUUM INTO ?`, bakPath); err != nil {
 		return fmt.Errorf("备份旧数据库失败: %w", err)
 	}
-	if err := os.Chmod(bakPath, 0o600); err != nil {
+	if err := os.Chmod(bakPath, 0o600); err != nil && runtime.GOOS != "windows" {
 		return fmt.Errorf("设置备份权限 0600: %w", err)
 	}
 	return nil

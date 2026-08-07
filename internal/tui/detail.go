@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,9 +22,12 @@ import (
 )
 
 var (
-	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
-	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
-	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	labelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#e0e0e0"})
+	valueStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#3b3b3b", Dark: "#ffffff"})
+	dimStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#6a6a6a", Dark: "#9e9e9e"})
 )
 
 // detailModel 是会话详情视图。
@@ -600,13 +605,18 @@ func humanDur(d time.Duration) string {
 }
 
 func shortHome(p string) string {
-	if strings.HasPrefix(p, "/home/") {
-		parts := strings.SplitN(strings.TrimPrefix(p, "/home/"), "/", 2)
-		if len(parts) == 2 {
-			return "~/" + parts[1]
-		}
+	if p == "" {
+		return ""
 	}
-	return p
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	rel, err := filepath.Rel(home, p)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return p
+	}
+	return filepath.Join("~", rel)
 }
 
 func firstLine(s string) string {

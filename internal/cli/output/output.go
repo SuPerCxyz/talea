@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -475,15 +476,16 @@ func shortDir(d string) string {
 	if d == "" {
 		return ""
 	}
-	if strings.HasPrefix(d, "/home/") {
-		rest := strings.TrimPrefix(d, "/home/")
-		parts := strings.SplitN(rest, "/", 2)
-		if len(parts) == 2 {
-			return "~/" + parts[1]
-		}
-		return "~"
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return d
 	}
-	return d
+	// 统一路径分隔符比较
+	rel, err := filepath.Rel(home, d)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return d
+	}
+	return filepath.Join("~", rel)
 }
 
 func oneLine(s string) string {

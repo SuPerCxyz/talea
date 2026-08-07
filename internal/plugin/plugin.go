@@ -79,7 +79,7 @@ func DiscoverPlugins() []string {
 
 func pathDirs() []string {
 	var dirs []string
-	for _, d := range strings.Split(os.Getenv("PATH"), ":") {
+	for _, d := range filepath.SplitList(os.Getenv("PATH")) {
 		if d != "" {
 			dirs = append(dirs, d)
 		}

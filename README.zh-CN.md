@@ -14,7 +14,7 @@
 [![License: MIT](https://img.shields.io/github/license/SuPerCxyz/talea)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/SuPerCxyz/talea)](https://github.com/SuPerCxyz/talea/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/SuPerCxyz/talea/ci.yml?branch=master)](https://github.com/SuPerCxyz/talea/actions)
-[![Platform](https://img.shields.io/badge/platform-linux--amd64%20%7C%20linux--arm64-8892b0)](https://github.com/SuPerCxyz/talea/releases)
+[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-8892b0)](https://github.com/SuPerCxyz/talea/releases)
 
 </div>
 

@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/talea/talea/internal/adapters"
@@ -61,7 +60,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	defer signal.Stop(sigCh)
 	go func() {
 		for sig := range sigCh {
-			if sig == syscall.SIGCHLD {
+			if isChildExitSignal(sig) {
 				continue
 			}
 			_ = cmd.Process.Signal(sig)

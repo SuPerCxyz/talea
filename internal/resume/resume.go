@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/i18n"
@@ -76,8 +76,10 @@ func Build(s model.Session, overrideDir string, mappings map[string]string) (Pla
 	}, nil
 }
 
-// Exec 在目标目录用参数数组执行恢复命令并替换进程。
-// binary 由调用方预先解析（LookPath），argv[0] 为二进制路径。
+// Exec 在目标目录启动恢复命令作为子进程，转发信号，
+// 等待其退出并以相同退出码退出当前进程。
+// 跨平台实现：不再使用 syscall.Exec（仅 Unix 支持），改为
+// exec.Command 子进程模式，行为等价——talea 退出码与 Agent 一致。
 func Exec(plan Plan) error {
 	if plan.Command.Program == "" {
 		return errors.New(i18n.Tr("missing resume program", "缺少恢复程序"))
@@ -85,16 +87,49 @@ func Exec(plan Plan) error {
 	binary, err := exec.LookPath(plan.Command.Program)
 	if err != nil {
 		return fmt.Errorf("%s: %w", i18n.Trf("%q not found", "未找到 %q", plan.Command.Program), err)
-	}
+		}
 	if err := os.Chdir(plan.TargetDir); err != nil {
 		return fmt.Errorf("%s: %w", i18n.Trf("cannot enter directory %s", "无法进入目录 %s", plan.TargetDir), err)
 	}
 	// 恢复终端：退出备用屏幕、显示光标、清屏。TUI 调用时 Bubble Tea
-	// 的 alt screen 清理因进程替换不会执行，需手动恢复，避免退出会话后
+	// 的 alt screen 清理因进程退出不会执行，需手动恢复，避免退出会话后
 	// 终端错位/光标消失/历史命令失效。
 	resetTerminal()
-	argv := append([]string{binary}, plan.Command.Args...)
-	return syscall.Exec(binary, argv, os.Environ())
+
+	cmd := exec.Command(binary, plan.Command.Args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	// 信号转发：将收到的信号传递给子进程
+	sigCh := make(chan os.Signal, 8)
+	signal.Notify(sigCh)
+	defer signal.Stop(sigCh)
+	go func() {
+		for sig := range sigCh {
+			// 忽略子进程退出信号
+			if sig == ignoreSignal {
+				continue
+			}
+			_ = cmd.Process.Signal(sig)
+		}
+	}()
+
+	err = cmd.Wait()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			// 以 Agent 的退出码退出当前进程
+			os.Exit(ee.ExitCode())
+		}
+		return err
+	}
+	os.Exit(0)
+	return nil
 }
 
 // resetTerminal 向终端发送恢复序列（退出备用屏幕、恢复光标、清屏）。

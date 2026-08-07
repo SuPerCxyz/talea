@@ -26,9 +26,73 @@ import (
 	"github.com/talea/talea/internal/search"
 )
 
+// 高对比度配色：统一使用 AdaptiveColor 适配深浅终端背景，
+// 深色背景取亮色前景，浅色背景取深色前景，避免默认灰色系对比度不足。
 var (
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	titleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#C2185B", Dark: "#FF9E80"})
 )
+
+// newListDelegate 返回高对比度的列表项样式。
+func newListDelegate() list.DefaultDelegate {
+	d := list.NewDefaultDelegate()
+	s := d.Styles
+
+	normalFG := lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#f0f0f0"}
+	normalDescFG := lipgloss.AdaptiveColor{Light: "#4a4a4a", Dark: "#b0b0b0"}
+	selectedFG := lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#000000"}
+	selectedBG := lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"}
+	selectedDescFG := lipgloss.AdaptiveColor{Light: "#f3e8ff", Dark: "#1a1a1a"}
+
+	s.NormalTitle = lipgloss.NewStyle().
+		Foreground(normalFG).
+		Padding(0, 0, 0, 2)
+	s.NormalDesc = lipgloss.NewStyle().
+		Foreground(normalDescFG).
+		Padding(0, 0, 0, 2)
+	s.SelectedTitle = lipgloss.NewStyle().
+		Foreground(selectedFG).
+		Background(selectedBG).
+		Bold(true).
+		Padding(0, 0, 0, 2)
+	s.SelectedDesc = lipgloss.NewStyle().
+		Foreground(selectedDescFG).
+		Background(selectedBG).
+		Padding(0, 0, 0, 2)
+	s.DimmedTitle = lipgloss.NewStyle().
+		Foreground(normalDescFG).
+		Padding(0, 0, 0, 2)
+	s.DimmedDesc = lipgloss.NewStyle().
+		Foreground(normalDescFG).
+		Padding(0, 0, 0, 2)
+	s.FilterMatch = lipgloss.NewStyle().Underline(true)
+	d.Styles = s
+	return d
+}
+
+// newListStyles 返回高对比度的列表容器样式（标题栏 / 状态栏 / 分页）。
+func newListStyles() list.Styles {
+	st := list.DefaultStyles()
+	subFG := lipgloss.AdaptiveColor{Light: "#2a2a2a", Dark: "#c8c8c8"}
+	st.StatusBar = lipgloss.NewStyle().
+		Foreground(subFG).
+		Padding(0, 0, 1, 2)
+	st.PaginationStyle = lipgloss.NewStyle().PaddingLeft(2)
+	st.HelpStyle = lipgloss.NewStyle().Padding(1, 0, 0, 2)
+	st.ActivePaginationDot = lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"}).
+		SetString(bullet)
+	st.InactivePaginationDot = lipgloss.NewStyle().
+		Foreground(subFG).
+		SetString(bullet)
+	st.DividerDot = lipgloss.NewStyle().
+		Foreground(subFG).
+		SetString(" " + bullet + " ")
+	return st
+}
+
+const bullet = "•"
 
 // loadTuiSessions 加载 TUI 会话列表，dir 非空时仅保留该目录前缀下的会话。
 // 固定按结束时间倒序排列（最新结束在前），不受配置 default_sort 影响，
@@ -183,10 +247,11 @@ func (i item) FilterValue() string {
 
 func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *index.DB, dir string) *mainModel {
 	items := itemsOf(sessions)
-	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	l := list.New(items, newListDelegate(), 0, 0)
 	l.Title = "Talea · Agent Sessions"
 	l.SetShowStatusBar(true)
 	l.SetFilteringEnabled(true)
+	l.Styles = newListStyles()
 
 	km := keyMap{
 		Open:   key.NewBinding(key.WithKeys("o"), key.WithHelp("o", i18n.Tr("resume session", "恢复会话"))),

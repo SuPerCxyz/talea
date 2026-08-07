@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -45,11 +46,16 @@ func Run(ctx context.Context, a *app.App, agentFilter string) (Report, error) {
 	if _, err := os.Stat(a.Paths.DBPath); err == nil {
 		fi, err := os.Stat(a.Paths.DBPath)
 		if err == nil {
-			mode := fi.Mode().Perm()
-			if mode&0o077 == 0 {
-				rep.addOK("索引权限", fmt.Sprintf("0600 (%s)", mode.String()))
+			if runtime.GOOS == "windows" {
+				// Windows 无 Unix 权限位语义，跳过权限检查
+				rep.addOK("索引权限", "Windows（跳过）")
 			} else {
-				rep.addWarn("索引权限", fmt.Sprintf("非 0600：%s", mode.String()))
+				mode := fi.Mode().Perm()
+				if mode&0o077 == 0 {
+					rep.addOK("索引权限", fmt.Sprintf("0600 (%s)", mode.String()))
+				} else {
+					rep.addWarn("索引权限", fmt.Sprintf("非 0600：%s", mode.String()))
+				}
 			}
 		}
 	}

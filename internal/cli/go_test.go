@@ -133,6 +133,10 @@ func TestGoRow(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			// shortDir 依赖 HOME 缩写工作目录
+			if c.sess.WorkingDirectory != "" {
+				t.Setenv("HOME", "/home/user")
+			}
 			got := goRow(c.sess)
 			if len(got) != len(c.want) {
 				t.Fatalf("行列数 %d != 期望 %d", len(got), len(c.want))

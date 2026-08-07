@@ -9,45 +9,9 @@ import (
 )
 
 // detectProcessRunning 检查进程表中是否存在指定可执行文件名的进程。
-// 读取 /proc 目录，避免依赖 ps 命令。
+// 由平台相关文件实现：activity_unix.go (读取 /proc)、activity_windows.go (tasklist)。
 func detectProcessRunning(execName string) bool {
-	if execName == "" {
-		return false
-	}
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if name[0] < '0' || name[0] > '9' {
-			continue
-		}
-		exe, err := os.Readlink("/proc/" + name + "/exe")
-		if err != nil {
-			continue
-		}
-		base := exe
-		if idx := lastSlash(exe); idx >= 0 {
-			base = exe[idx+1:]
-		}
-		if base == execName {
-			return true
-		}
-	}
-	return false
-}
-
-func lastSlash(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '/' {
-			return i
-		}
-	}
-	return -1
+	return detectProcessRunningOS(execName)
 }
 
 // ProcessActivityDetector 是通用的进程活动检测器。
@@ -69,8 +33,6 @@ func (d ProcessActivityDetector) DetectActivity(
 	ctx context.Context,
 	session model.Session,
 ) (model.ActivityState, error) {
-	// 进程检测是 O(/proc 全扫描)，批量检测时应由调用方先做一次
-	// AgentProcessRunning 快路径。这里保留单次能力供独立使用。
 	if detectProcessRunning(d.Executable) {
 		return model.ActivityActive, nil
 	}

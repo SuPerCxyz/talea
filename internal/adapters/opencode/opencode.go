@@ -94,7 +94,7 @@ func (a *Adapter) Detect(ctx context.Context) ([]model.AgentInstance, error) {
 		ExecutablePath: bin,
 		Version:        versionOf(),
 		DataDirectory:  dataDir,
-		ConfigPath:     filepath.Join(os.Getenv("HOME"), ".config", "opencode", "opencode.json"),
+		ConfigPath:     filepath.Join(home, ".config", "opencode", "opencode.json"),
 	}
 	return []model.AgentInstance{inst}, nil
 }
