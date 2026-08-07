@@ -88,6 +88,12 @@ func Run(ctx context.Context, a *app.App, opts Options) error {
 				continue
 			}
 			pending = true
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			timer.Reset(interval)
 		case <-timer.C:
 			if !pending {

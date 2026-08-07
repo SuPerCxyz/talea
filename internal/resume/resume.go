@@ -87,9 +87,6 @@ func Exec(plan Plan) error {
 	binary, err := exec.LookPath(plan.Command.Program)
 	if err != nil {
 		return fmt.Errorf("%s: %w", i18n.Trf("%q not found", "未找到 %q", plan.Command.Program), err)
-		}
-	if err := os.Chdir(plan.TargetDir); err != nil {
-		return fmt.Errorf("%s: %w", i18n.Trf("cannot enter directory %s", "无法进入目录 %s", plan.TargetDir), err)
 	}
 	// 恢复终端：退出备用屏幕、显示光标、清屏。TUI 调用时 Bubble Tea
 	// 的 alt screen 清理因进程退出不会执行，需手动恢复，避免退出会话后
@@ -97,6 +94,7 @@ func Exec(plan Plan) error {
 	resetTerminal()
 
 	cmd := exec.Command(binary, plan.Command.Args...)
+	cmd.Dir = plan.TargetDir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -106,13 +104,12 @@ func Exec(plan Plan) error {
 		return err
 	}
 
-	// 信号转发：将收到的信号传递给子进程
+	// 信号转发：仅转发中断/终止信号，避免 SIGWINCH 等无关信号干扰子进程
 	sigCh := make(chan os.Signal, 8)
-	signal.Notify(sigCh)
+	notifyResumeSignals(sigCh)
 	defer signal.Stop(sigCh)
 	go func() {
 		for sig := range sigCh {
-			// 忽略子进程退出信号
 			if sig == ignoreSignal {
 				continue
 			}

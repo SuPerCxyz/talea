@@ -114,17 +114,14 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, fmt.Errorf("缺少 id 参数"))
 		return
 	}
-	results, err := search.Search(ctx, s.DB, search.Query{Term: id, Limit: 5})
+	results, err := search.ByIDPrefix(ctx, s.DB, id, "", 5)
 	if err != nil {
 		writeJSONErr(w, err)
 		return
 	}
 	var sess *model.Session
-	for i := range results {
-		if results[i].Session.SessionID == id || hasPrefix(results[i].Session.SessionID, id) {
-			sess = &results[i].Session
-			break
-		}
+	if len(results) > 0 {
+		sess = &results[0].Session
 	}
 	if sess == nil {
 		writeJSONErr(w, fmt.Errorf("未找到会话"))
@@ -150,17 +147,14 @@ func (s *Server) handleTimeline(w http.ResponseWriter, r *http.Request) {
 		writeJSONErr(w, fmt.Errorf("缺少 id 参数"))
 		return
 	}
-	results, err := search.Search(ctx, s.DB, search.Query{Term: id, Limit: 5})
+	results, err := search.ByIDPrefix(ctx, s.DB, id, "", 5)
 	if err != nil {
 		writeJSONErr(w, err)
 		return
 	}
 	var sess *model.Session
-	for i := range results {
-		if results[i].Session.SessionID == id || hasPrefix(results[i].Session.SessionID, id) {
-			sess = &results[i].Session
-			break
-		}
+	if len(results) > 0 {
+		sess = &results[0].Session
 	}
 	if sess == nil {
 		writeJSONErr(w, fmt.Errorf("未找到会话"))
@@ -201,10 +195,6 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
-}
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 func fmtTime(t *time.Time) string {

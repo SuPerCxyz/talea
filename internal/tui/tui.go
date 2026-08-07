@@ -286,14 +286,14 @@ func itemsOf(sessions []*model.Session) []list.Item {
 	return items
 }
 
-// indexOf 返回匹配会话 ID 的项下标，未找到返回 0。
+// indexOf 返回匹配会话 ID 的项下标，未找到返回 -1。
 func indexOf(items []list.Item, id string) int {
 	for i, it := range items {
 		if item, ok := it.(item); ok && item.sess.SessionID == id {
 			return i
 		}
 	}
-	return 0
+	return -1
 }
 
 func sessionTitle(s *model.Session) string {
@@ -415,6 +415,7 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			m.detail.view.Width = msg.Width
 			m.detail.view.Height = msg.Height - 2
+			m.detail.contentValid = false
 		}
 		return m, nil
 	case indexedMsg:
@@ -436,7 +437,9 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessions = sessions
 		m.list.SetItems(itemsOf(sessions))
 		if sel != "" {
-			m.list.Select(indexOf(itemsOf(sessions), sel))
+			if idx := indexOf(itemsOf(sessions), sel); idx >= 0 {
+				m.list.Select(idx)
+			}
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -481,6 +484,7 @@ func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Turns):
 		if m.detail != nil {
 			m.detail.turnsVisible = !m.detail.turnsVisible
+			m.detail.contentValid = false
 		}
 		return m, nil
 	}

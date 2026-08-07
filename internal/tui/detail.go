@@ -43,8 +43,12 @@ type detailModel struct {
 
 	// 用户轮次默认折叠，按 t 展开
 	turnsVisible bool
-	turnsCount   int
-	turnsLoaded  bool
+	turnsCount  int
+	turnsLoaded bool
+
+	// 渲染缓存：避免每次 View() 重复查询 DB
+	cachedContent string
+	contentValid  bool
 }
 
 // render 渲染详情页全部内容（聚合展示，viewport 滚动查看）。
@@ -281,7 +285,6 @@ func (d *detailModel) renderSubagents() string {
 	sb.WriteString(titleStyle.Render(i18n.Tr("Sub-Agent Sessions", "子 Agent 会话")) + "\n\n")
 	found := false
 	for rows.Next() {
-		found = true
 		var (
 			sid, fq  string
 			started  *int64
@@ -290,12 +293,16 @@ func (d *detailModel) renderSubagents() string {
 		if err := rows.Scan(&sid, &fq, &started, &hasUsage); err != nil {
 			continue
 		}
+		found = true
 		ts := ""
 		if started != nil {
 			ts = time.Unix(*started, 0).Format("01-02 15:04")
 		}
 		sb.WriteString(fmt.Sprintf("%s  %s  %s\n", ts, truncRunes(sid, 20), truncRunes(firstLine(fq), 40)))
 		_ = hasUsage
+	}
+	if err := rows.Err(); err != nil && !found {
+		sb.WriteString(i18n.Trf("Failed to load sub-sessions: %v", "加载子会话失败：%v", err) + "\n")
 	}
 	if !found {
 		sb.WriteString(i18n.Tr("This session has no sub-agent sessions", "该会话没有子 Agent 会话") + "\n")
@@ -406,17 +413,20 @@ func (d *detailModel) renderDetail() string {
 	return sb.String()
 }
 
-// loadTurnsCount 惰性加载用户轮次数（渲染阶段最多查一次）。
+// loadTurnsCount 惰性加载用户轮次数（轻量 COUNT 查询，不加载完整轮次数据）。
 func (d *detailModel) loadTurnsCount() {
 	d.turnsLoaded = true
 	if d.db == nil {
 		return
 	}
-	turns, err := timeline.GroupByTurns(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID)
-	if err != nil {
-		return
+	var n int
+	err := d.db.SQL().QueryRowContext(d.ctx, `
+		SELECT COUNT(*) FROM usage_timeline_events
+		WHERE agent_instance_id = ? AND session_id = ? AND event_type = 'user_message'`,
+		d.sess.AgentInstanceID, d.sess.SessionID).Scan(&n)
+	if err == nil {
+		d.turnsCount = n
 	}
-	d.turnsCount = len(turns)
 }
 
 // View 渲染详情视图。
@@ -432,7 +442,11 @@ func (d *detailModel) View() string {
 		d.view = viewport.New(w, h)
 		d.ready = true
 	}
-	d.view.SetContent(d.render())
+	if !d.contentValid {
+		d.cachedContent = d.render()
+		d.contentValid = true
+	}
+	d.view.SetContent(d.cachedContent)
 	return d.view.View()
 }
 

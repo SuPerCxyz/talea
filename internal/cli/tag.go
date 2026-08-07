@@ -17,7 +17,7 @@ func newTagCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tag <session-id> [tags...]",
 		Short: i18n.Tr("session tags / favorite / note", "会话标签 / 收藏 / 备注"),
-		Args:  cobra.ArbitraryArgs,
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			a, err := app.New(ctx)

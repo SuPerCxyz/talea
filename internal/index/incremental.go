@@ -58,8 +58,34 @@ func (db *DB) UpsertMany(ctx context.Context, sessions []*model.Session) (Increm
 	defer tx.Rollback()
 
 	var st IncrementStats
-	// 复用事务句柄的直通方法
-	txDB := &txIndex{tx: tx}
+	// 预加载已存在会话键，避免逐条 SELECT EXISTS（N+1 查询）
+	existing := make(map[string]bool, len(sessions))
+	if len(sessions) > 0 {
+		keys := make([]string, 0, len(sessions))
+		instIDs := make([]string, 0, len(sessions))
+		sesIDs := make([]string, 0, len(sessions))
+		for _, s := range sessions {
+			instIDs = append(instIDs, s.AgentInstanceID)
+			sesIDs = append(sesIDs, s.SessionID)
+			keys = append(keys, s.AgentInstanceID+"\x00"+s.SessionID)
+		}
+		// 单查询批量检查存在性
+		rows, err := tx.QueryContext(ctx,
+			`SELECT agent_instance_id, session_id FROM sessions
+			 WHERE agent_instance_id IN (`+placeholders(len(instIDs))+`)
+			   AND session_id IN (`+placeholders(len(sesIDs))+`)`,
+			toArgs(instIDs, sesIDs)...)
+		if err == nil {
+			for rows.Next() {
+				var iid, sid string
+				if err := rows.Scan(&iid, &sid); err == nil {
+					existing[iid+"\x00"+sid] = true
+				}
+			}
+			rows.Close()
+		}
+	}
+	txDB := &txIndex{tx: tx, existing: existing}
 	for _, s := range sessions {
 		updated, err := txDB.upsertSession(ctx, s)
 		if err != nil {
@@ -81,18 +107,12 @@ func (db *DB) UpsertMany(ctx context.Context, sessions []*model.Session) (Increm
 
 // txIndex 是事务内索引写入的薄封装。
 type txIndex struct {
-	tx *sql.Tx
+	tx      *sql.Tx
+	existing map[string]bool
 }
 
 func (t *txIndex) upsertSession(ctx context.Context, s *model.Session) (bool, error) {
-	// 查询是否已存在以区分新增/更新
-	var exists bool
-	err := t.tx.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM sessions WHERE agent_instance_id=? AND session_id=?)`,
-		s.AgentInstanceID, s.SessionID).Scan(&exists)
-	if err != nil {
-		return false, err
-	}
+	exists := t.existing[s.AgentInstanceID+"\x00"+s.SessionID]
 
 	res, err := t.tx.ExecContext(ctx, `
 		INSERT INTO sessions (
@@ -218,4 +238,28 @@ func (db *DB) Count(ctx context.Context) (int, error) {
 	var n int
 	err := db.sql.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&n)
 	return n, err
+}
+
+// placeholders 返回 n 个 ? 用逗号分隔。
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	out := make([]byte, 0, n*2)
+	out = append(out, '?')
+	for i := 1; i < n; i++ {
+		out = append(out, ',', '?')
+	}
+	return string(out)
+}
+
+// toArgs 将多个切片拼接为 []any。
+func toArgs(slices ...[]string) []any {
+	var out []any
+	for _, s := range slices {
+		for _, v := range s {
+			out = append(out, v)
+		}
+	}
+	return out
 }

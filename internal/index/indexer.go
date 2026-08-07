@@ -173,11 +173,6 @@ func (ix *Indexer) ResolveSubagentRelations(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// 先加载全部已索引会话
-	all, err := ix.loadAllSessions(ctx)
-	if err != nil {
-		return 0, err
-	}
 	count := 0
 	for _, inst := range insts {
 		ad, ok := ix.App.Registry.Get(inst.AgentID)
@@ -188,11 +183,10 @@ func (ix *Indexer) ResolveSubagentRelations(ctx context.Context) (int, error) {
 		if !ok {
 			continue
 		}
-		var sessions []model.Session
-		for _, s := range all {
-			if s.AgentInstanceID == inst.InstanceID {
-				sessions = append(sessions, *s)
-			}
+		// 按实例查询，避免加载全量会话后 O(n) 过滤
+		sessions, err := ix.loadSessionsByInstance(ctx, inst.InstanceID)
+		if err != nil {
+			continue
 		}
 		rels, err := prov.ResolveSessionRelations(ctx, sessions)
 		if err != nil {
@@ -207,17 +201,18 @@ func (ix *Indexer) ResolveSubagentRelations(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// loadAllSessions 读取全部索引会话（精简字段）。
-func (ix *Indexer) loadAllSessions(ctx context.Context) ([]*model.Session, error) {
+// loadSessionsByInstance 读取指定实例的已索引会话（精简字段）。
+func (ix *Indexer) loadSessionsByInstance(ctx context.Context, instanceID string) ([]model.Session, error) {
 	rows, err := ix.DB.SQL().QueryContext(ctx,
-		`SELECT agent_id, agent_instance_id, session_id, source_path FROM sessions`)
+		`SELECT agent_id, agent_instance_id, session_id, source_path FROM sessions
+		 WHERE agent_instance_id = ?`, instanceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*model.Session
+	var out []model.Session
 	for rows.Next() {
-		s := &model.Session{}
+		var s model.Session
 		if err := rows.Scan(&s.AgentID, &s.AgentInstanceID, &s.SessionID, &s.SourcePath); err != nil {
 			continue
 		}

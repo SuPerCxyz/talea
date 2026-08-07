@@ -31,7 +31,7 @@ func Generate(ctx context.Context, db *index.DB, instanceID, sessionID string) (
 	events, err := timeline.List(ctx, db, timeline.Query{
 		AgentInstanceID: instanceID,
 		SessionID:       sessionID,
-		Limit:           100000,
+		Limit:           10000,
 	})
 	if err != nil {
 		return rep, err

@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"time"
 
 	"github.com/talea/talea/internal/adapters"
@@ -31,19 +30,18 @@ type Runner struct {
 }
 
 // Run 启动 Agent，转发信号，等待退出，调用 UpdateAfter 记录真实时间。
+// 返回子进程的退出错误（如有），调用方可通过 r.ExitCode 获取退出码。
 func (r *Runner) Run(ctx context.Context) error {
 	bin, err := exec.LookPath(r.Program)
 	if err != nil {
 		return fmt.Errorf("未找到 %q: %w", r.Program, err)
 	}
-	if r.Cwd != "" {
-		if err := os.Chdir(r.Cwd); err != nil {
-			return fmt.Errorf("无法进入 %s: %w", r.Cwd, err)
-		}
-	}
 
 	r.StartedAt = time.Now()
 	cmd := exec.Command(bin, r.Args...)
+	if r.Cwd != "" {
+		cmd.Dir = r.Cwd
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -54,9 +52,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 	r.PID = cmd.Process.Pid
 
-	// 信号转发
+	// 信号转发：仅转发中断/终止信号，避免 SIGWINCH 等无关信号干扰子进程
 	sigCh := make(chan os.Signal, 8)
-	signal.Notify(sigCh)
+	notifyRunSignals(sigCh)
 	defer signal.Stop(sigCh)
 	go func() {
 		for sig := range sigCh {
@@ -74,7 +72,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.UpdateAfter != nil {
 		_ = r.UpdateAfter(r.StartedAt, r.EndedAt, r.PID, r.ExitCode)
 	}
-	return nil
+	return err
 }
 
 // UpdateSessionTimes 用真实进程时间更新索引中该目录下时间窗口内的会话。
@@ -104,8 +102,11 @@ func UpdateSessionTimes(ctx context.Context, inst model.AgentInstance, dir strin
 	}
 	var sessionID string
 	found := rows.Next()
-	if err := rows.Scan(&sessionID); err != nil && found {
-		return err
+	if found {
+		if err := rows.Scan(&sessionID); err != nil {
+			rows.Close()
+			return err
+		}
 	}
 	rows.Close()
 
@@ -119,8 +120,11 @@ func UpdateSessionTimes(ctx context.Context, inst model.AgentInstance, dir strin
 			return err
 		}
 		found = rows.Next()
-		if err := rows.Scan(&sessionID); err != nil && found {
-			return err
+		if found {
+			if err := rows.Scan(&sessionID); err != nil {
+				rows.Close()
+				return err
+			}
 		}
 		rows.Close()
 	}
@@ -156,4 +160,3 @@ func exitCodeOf(err error) int {
 }
 
 var _ = adapters.Command{}
-var _ = filepath.Join

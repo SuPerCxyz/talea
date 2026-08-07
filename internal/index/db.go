@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -239,7 +240,9 @@ func (db *DB) backupIfVersionChange(ctx context.Context) error {
 	// 版本变化：用 VACUUM INTO 生成一致快照备份
 	bakPath := filepath.Join(db.dir,
 		fmt.Sprintf("index.db.v%s.bak-%d", curVersion, time.Now().Unix()))
-	if _, err := db.sql.ExecContext(ctx, `VACUUM INTO ?`, bakPath); err != nil {
+	// VACUUM INTO 不支持绑定参数，使用单引号引用路径并转义内部单引号
+	quotedPath := strings.ReplaceAll(bakPath, "'", "''")
+	if _, err := db.sql.ExecContext(ctx, fmt.Sprintf(`VACUUM INTO '%s'`, quotedPath)); err != nil {
 		return fmt.Errorf("备份旧数据库失败: %w", err)
 	}
 	if err := os.Chmod(bakPath, 0o600); err != nil && runtime.GOOS != "windows" {
