@@ -101,11 +101,11 @@ talea go --dir /home/user/myproject
 ## TUI
 
 ```text
-talea          # session list, newest start first (most recent 500)
+talea          # session list, newest end time first (most recent 500)
 talea --dir /path   # restrict the list to sessions under /path
 ```
 
-- Sessions are always sorted by start time (newest first), independent of
+- Sessions are always sorted by end time (newest first), independent of
   `default_sort` in the config.
 - `↑` / `↓` select, `Enter` resume, `d` open details, `o` resume from details,
   `/` filter (type then `Enter` to apply, then `Enter`/`o` to enter), `q` quit.

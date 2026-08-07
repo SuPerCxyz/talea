@@ -231,7 +231,8 @@ func TestFilterModeIgnoresFunctionKeys(t *testing.T) {
 	}
 }
 
-// TestLoadTuiSessionsTimeSort 验证 TUI 会话列表固定按开始时间倒序排列。
+// TestLoadTuiSessionsTimeSort 验证 TUI 会话列表固定按结束时间倒序排列，
+// 与 talea list / talea go 一致，不受配置 default_sort 影响。
 func TestLoadTuiSessionsTimeSort(t *testing.T) {
 	ctx := context.Background()
 	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
@@ -246,12 +247,15 @@ func TestLoadTuiSessionsTimeSort(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := time.Date(2026, 8, 5, 16, 0, 0, 0, time.Local)
-	newer := mkTuiSession("ses_new", "/home/user/nexora")
-	newer.StartedAt = timePtr(base.Add(3 * time.Hour))
-	mid := mkTuiSession("ses_mid", "/home/user/nexora")
-	mid.StartedAt = timePtr(base.Add(2 * time.Hour))
 	older := mkTuiSession("ses_old", "/home/user/nexora")
 	older.StartedAt = timePtr(base.Add(time.Hour))
+	older.EndedAt = timePtr(base.Add(2 * time.Hour))
+	mid := mkTuiSession("ses_mid", "/home/user/nexora")
+	mid.StartedAt = timePtr(base.Add(2 * time.Hour))
+	mid.EndedAt = timePtr(base.Add(3 * time.Hour))
+	newer := mkTuiSession("ses_new", "/home/user/nexora")
+	newer.StartedAt = timePtr(base.Add(3 * time.Hour))
+	newer.EndedAt = timePtr(base.Add(4 * time.Hour))
 	for _, s := range []*model.Session{mid, older, newer} {
 		if err := db.UpsertSession(ctx, s); err != nil {
 			t.Fatal(err)
@@ -261,7 +265,7 @@ func TestLoadTuiSessionsTimeSort(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Default()
-	// 故意把 default_sort 设为 name，验证 TUI 仍按时间排
+	// 故意把 default_sort 设为 name，验证 TUI 仍按结束时间排
 	cfg.General.DefaultSort = "name"
 	reg := adapters.NewRegistry()
 	a := &app.App{Registry: reg, Config: cfg}
@@ -278,8 +282,25 @@ func TestLoadTuiSessionsTimeSort(t *testing.T) {
 	}
 }
 
-func timePtr(t time.Time) *time.Time { return &t }
+// TestEndTsFallback 验证 endTs 的兜底顺序：结束 > 开始 > 最后活动。
+func TestEndTsFallback(t *testing.T) {
+	base := time.Date(2026, 8, 5, 16, 0, 0, 0, time.Local)
+	// 无结束时间：用开始时间
+	s := mkTuiSession("ses_a", "/x")
+	s.EndedAt = nil
+	s.StartedAt = timePtr(base.Add(time.Hour))
+	if got := endTs(s); got != base.Add(time.Hour).Unix() {
+		t.Fatalf("endTs with nil EndedAt: got %d, want %d", got, base.Add(time.Hour).Unix())
+	}
+	// 结束时间优先
+	s.EndedAt = timePtr(base.Add(2 * time.Hour))
+	if got := endTs(s); got != base.Add(2*time.Hour).Unix() {
+		t.Fatalf("endTs with EndedAt: got %d, want %d", got, base.Add(2*time.Hour).Unix())
+	}
+}
 
 // 确保 list 类型已使用（避免导入未用）
 var _ list.Item = item{}
 var _ tea.Model = (*mainModel)(nil)
+
+func timePtr(t time.Time) *time.Time { return &t }

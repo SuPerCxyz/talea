@@ -31,7 +31,8 @@ var (
 )
 
 // loadTuiSessions 加载 TUI 会话列表，dir 非空时仅保留该目录前缀下的会话。
-// 固定按开始时间倒序排列（最新开始在前），不受配置 default_sort 影响。
+// 固定按结束时间倒序排列（最新结束在前），不受配置 default_sort 影响，
+// 与 talea list / talea go 保持一致。
 func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) ([]*model.Session, error) {
 	results, err := search.List(ctx, db, search.Query{Cwd: dir, Limit: 500})
 	if err != nil {
@@ -43,13 +44,16 @@ func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) 
 	}
 	a.ResolveWorkingDirs(ctx, sessions)
 	sort.SliceStable(sessions, func(i, j int) bool {
-		return startedTs(sessions[i]) > startedTs(sessions[j])
+		return endTs(sessions[i]) > endTs(sessions[j])
 	})
 	return sessions, nil
 }
 
-// startedTs 返回会话开始时间的 Unix 秒（无开始时间用最后活动时间兜底）。
-func startedTs(s *model.Session) int64 {
+// endTs 返回会话结束时间的 Unix 秒（无结束时间依次用开始时间、最后活动时间兜底）。
+func endTs(s *model.Session) int64 {
+	if s.EndedAt != nil {
+		return s.EndedAt.Unix()
+	}
 	if s.StartedAt != nil {
 		return s.StartedAt.Unix()
 	}
