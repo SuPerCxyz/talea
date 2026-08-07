@@ -101,12 +101,14 @@ talea go --dir /home/user/myproject
 ## TUI
 
 ```text
-talea          # session list (most recent 500)
+talea          # session list, newest start first (most recent 500)
 talea --dir /path   # restrict the list to sessions under /path
 ```
 
+- Sessions are always sorted by start time (newest first), independent of
+  `default_sort` in the config.
 - `↑` / `↓` select, `Enter` resume, `d` open details, `o` resume from details,
-  `/` filter, `q` quit.
+  `/` filter (type then `Enter` to apply, then `Enter`/`o` to enter), `q` quit.
 - The detail page aggregates: session info (two-column layout), first question,
   user turns (`t` to expand/collapse), a **context window curve** (area chart with a
   token y-axis and time axis), per-model summary, token chart, token summary and

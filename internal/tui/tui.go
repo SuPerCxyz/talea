@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -30,6 +31,7 @@ var (
 )
 
 // loadTuiSessions 加载 TUI 会话列表，dir 非空时仅保留该目录前缀下的会话。
+// 固定按开始时间倒序排列（最新开始在前），不受配置 default_sort 影响。
 func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) ([]*model.Session, error) {
 	results, err := search.List(ctx, db, search.Query{Cwd: dir, Limit: 500})
 	if err != nil {
@@ -40,8 +42,21 @@ func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) 
 		sessions = append(sessions, &results[i].Session)
 	}
 	a.ResolveWorkingDirs(ctx, sessions)
-	a.SortSessions(sessions)
+	sort.SliceStable(sessions, func(i, j int) bool {
+		return startedTs(sessions[i]) > startedTs(sessions[j])
+	})
 	return sessions, nil
+}
+
+// startedTs 返回会话开始时间的 Unix 秒（无开始时间用最后活动时间兜底）。
+func startedTs(s *model.Session) int64 {
+	if s.StartedAt != nil {
+		return s.StartedAt.Unix()
+	}
+	if s.LastActivityAt != nil {
+		return s.LastActivityAt.Unix()
+	}
+	return 0
 }
 
 // Run 启动 TUI。
@@ -359,8 +374,9 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			return m.handleDetailKey(msg)
 		}
-		// 过滤模式下按键应输入到过滤器，不得触发功能键
-		if m.list.FilterState() != list.Unfiltered {
+		// 过滤输入中（Filtering）：按键应输入到过滤器，enter 应用过滤，
+		// 不得触发功能键；过滤已应用（FilterApplied）后恢复功能键可进入会话
+		if m.list.FilterState() == list.Filtering {
 			var fcmd tea.Cmd
 			m.list, fcmd = m.list.Update(msg)
 			return m, fcmd
