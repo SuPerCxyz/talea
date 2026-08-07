@@ -359,6 +359,12 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			return m.handleDetailKey(msg)
 		}
+		// 过滤模式下按键应输入到过滤器，不得触发功能键
+		if m.list.FilterState() != list.Unfiltered {
+			var fcmd tea.Cmd
+			m.list, fcmd = m.list.Update(msg)
+			return m, fcmd
+		}
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit

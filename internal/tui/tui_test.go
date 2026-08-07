@@ -140,6 +140,73 @@ func TestDetailRenderEmptyDB(t *testing.T) {
 	}
 }
 
+// TestFilterModeIgnoresFunctionKeys 回归：过滤模式下按 o/d/enter 等
+// 功能键不得触发恢复/详情，按键应交给 list 作为过滤输入。
+func TestFilterModeIgnoresFunctionKeys(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
+	s := mkTuiSession("ses_1", "/home/user/nexora")
+	m := newMain(ctx, a, []*model.Session{s}, nil, "")
+
+	// 进入过滤模式：list 收到 "/" 后状态变为 Filtering
+	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	mm, ok := nm.(*mainModel)
+	if !ok {
+		t.Fatal("model type changed")
+	}
+	if mm.list.FilterState() != list.Filtering {
+		t.Fatalf("expected Filtering state, got %v", mm.list.FilterState())
+	}
+
+	// 过滤模式下按 "o"：不得触发恢复（picked 必须保持 nil）
+	nm2, _ := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	mm2, ok := nm2.(*mainModel)
+	if !ok {
+		t.Fatal("model type changed")
+	}
+	if mm2.picked != nil {
+		t.Fatalf("filter mode: 'o' triggered resume, picked=%v", mm2.picked.SessionID)
+	}
+	if got := mm2.list.FilterValue(); got != "o" {
+		t.Fatalf("filter mode: 'o' not entered filter input, got %q", got)
+	}
+	if mm2.list.FilterState() == list.Unfiltered {
+		t.Fatal("expected non-Unfiltered state after filter input")
+	}
+
+	// 过滤模式下按 "d"：不得打开详情
+	nm3, _ := mm2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	mm3, ok := nm3.(*mainModel)
+	if !ok {
+		t.Fatal("model type changed")
+	}
+	if mm3.detail != nil {
+		t.Fatal("filter mode: 'd' opened detail")
+	}
+
+	// esc 退出过滤模式
+	nm4, _ := mm3.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mm4, ok := nm4.(*mainModel)
+	if !ok {
+		t.Fatal("model type changed")
+	}
+	if mm4.list.FilterState() != list.Unfiltered {
+		t.Fatalf("expected Unfiltered after esc, got %v", mm4.list.FilterState())
+	}
+
+	// 退出过滤后按 "o"：应触发恢复
+	nm5, _ := mm4.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	mm5, ok := nm5.(*mainModel)
+	if !ok {
+		t.Fatal("model type changed")
+	}
+	if mm5.picked == nil || mm5.picked.SessionID != "ses_1" {
+		t.Fatal("unfiltered mode: 'o' should trigger resume")
+	}
+}
+
 // 确保 list 类型已使用（避免导入未用）
 var _ list.Item = item{}
 var _ tea.Model = (*mainModel)(nil)
