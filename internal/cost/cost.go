@@ -51,7 +51,10 @@ func modelNameOf(u *model.TokenUsage) string {
 }
 
 func roundMicros(v float64) int64 {
-	// 四舍五入到微单位
+	// v 是美元金额，乘 1_000_000 转为微货币单位并四舍五入
+	if v < 0 {
+		return 0
+	}
 	return int64(v*1_000_000 + 0.5)
 }
 

@@ -130,7 +130,7 @@ func Aggregate(ctx context.Context, db *index.DB, instanceID, sessionID string) 
 		       COALESCE(SUM(COALESCE(output_tokens,0)),0),
 		       COALESCE(MAX(COALESCE(context_after,0)),0)
 		FROM usage_timeline_events
-		WHERE agent_instance_id=? AND session_id=?`, instanceID, sessionID)
+		WHERE agent_instance_id=? AND session_id=? AND event_type='request'`, instanceID, sessionID)
 	err := row.Scan(&s.RequestCount, &s.TotalTokens, &s.InputTokens, &s.OutputTokens, &s.PeakContext)
 	if err != nil {
 		return s, err

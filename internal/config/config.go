@@ -167,8 +167,16 @@ func xdgHome(env, home, def string) string {
 }
 
 func homeDir() string {
-	if h, err := os.UserHomeDir(); err == nil {
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
 		return h
 	}
-	return "~"
+	// UserHomeDir 失败时回退到 HOME 环境变量（覆盖大多数场景）
+	if h := os.Getenv("HOME"); h != "" {
+		return h
+	}
+	// 最后回退到当前目录，避免产生字面 "~" 路径
+	if wd, err := os.Getwd(); err == nil {
+		return wd
+	}
+	return "."
 }

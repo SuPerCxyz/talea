@@ -80,29 +80,27 @@ func GroupByBucket(ctx context.Context, db *index.DB, instanceID, sessionID stri
 	if dur == 0 {
 		dur = time.Minute
 	}
+	durSec := int64(dur / time.Second)
 	buckets := make([]Bucket, 0, 16)
-	var (
-		cur    *Bucket
-		curKey int64
-	)
+	curIdx := -1
+	var curKey int64
 	for _, e := range events {
 		if e.EventType != model.UsageEventRequest || e.Timestamp == nil {
 			continue
 		}
-		key := e.Timestamp.Unix() / int64(dur.Seconds())
-		if cur == nil || key != curKey {
-			start := time.Unix(key*int64(dur.Seconds()), 0)
-			b := Bucket{Start: start, End: start.Add(dur)}
-			buckets = append(buckets, b)
-			cur = &buckets[len(buckets)-1]
+		key := e.Timestamp.Unix() / durSec
+		if curIdx < 0 || key != curKey {
+			start := time.Unix(key*durSec, 0)
+			buckets = append(buckets, Bucket{Start: start, End: start.Add(dur)})
+			curIdx = len(buckets) - 1
 			curKey = key
 		}
-		cur.Requests++
-		cur.InputTokens += value(e.InputTokens)
-		cur.OutputTokens += value(e.OutputTokens)
-		cur.TotalTokens += value(e.TotalTokens)
-		cur.CacheRead += value(e.CacheReadTokens)
-		cur.Reasoning += value(e.ReasoningTokens)
+		buckets[curIdx].Requests++
+		buckets[curIdx].InputTokens += value(e.InputTokens)
+		buckets[curIdx].OutputTokens += value(e.OutputTokens)
+		buckets[curIdx].TotalTokens += value(e.TotalTokens)
+		buckets[curIdx].CacheRead += value(e.CacheReadTokens)
+		buckets[curIdx].Reasoning += value(e.ReasoningTokens)
 	}
 	return buckets, nil
 }

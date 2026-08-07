@@ -52,10 +52,10 @@ func IsPathSafe(p string) (bool, string) {
 	if p == "" {
 		return true, ""
 	}
-	dangerous := []string{";", "&&", "||", "`", "$(", "|"}
+	dangerous := []string{";", "&&", "||", "`", "$(", "|", ".."}
 	for _, d := range dangerous {
 		if strings.Contains(p, d) {
-			return false, "路径包含 shell 元字符: " + d
+			return false, "路径包含危险字符: " + d
 		}
 	}
 	return true, ""

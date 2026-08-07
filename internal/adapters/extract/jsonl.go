@@ -129,7 +129,8 @@ func ReadFileJSON(path string) ([]map[string]any, []error, error) {
 		objs = append(objs, obj)
 	}
 	if r.sc.Err() != nil {
-		return nil, nil, r.sc.Err()
+		// 返回已解析的行 + 错误，不丢弃已收集数据
+		return objs, errs, r.sc.Err()
 	}
 	return objs, errs, nil
 }

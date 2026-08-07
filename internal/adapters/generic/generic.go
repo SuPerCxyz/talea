@@ -196,24 +196,61 @@ func sessionIDOf(src adapters.SessionSource) string {
 
 // questionFromLine 从 user 消息提取首次提问。
 func questionFromLine(l *line) (string, bool) {
-	if len(l.Message) == 0 {
-		return "", false
+	return extractTextFromContent(l.Message, true), len(l.Message) > 0 && l.Type == "user"
+}
+
+// messageText 从消息 content 字段提取纯文本。
+func messageText(l *line) string {
+	return extractTextFromContent(l.Message, false)
+}
+
+// extractTextFromContent 从 JSON 消息的 content 字段提取文本。
+// content 可以是 string 或 block array（[{type:"text", text:"..."}, ...]）。
+// stripInjected 为 true 时清理注入内容。
+func extractTextFromContent(msg []byte, stripInjected bool) string {
+	if len(msg) == 0 {
+		return ""
 	}
 	var m struct {
 		Content json.RawMessage `json:"content"`
 	}
-	if err := json.Unmarshal(l.Message, &m); err != nil {
-		return "", false
+	if err := json.Unmarshal(msg, &m); err != nil {
+		return ""
 	}
+	// 尝试 string
 	var str string
 	if err := json.Unmarshal(m.Content, &str); err == nil {
-		cleaned := extract.StripInjectedContent(str)
-		if cleaned != "" && !extract.IsInjectedBlock(cleaned) {
-			return cleaned, true
+		if stripInjected {
+			cleaned := extract.StripInjectedContent(str)
+			if cleaned != "" && !extract.IsInjectedBlock(cleaned) {
+				return cleaned
+			}
+			return ""
 		}
-		return "", false
+		return str
 	}
-	return "", false
+	// 尝试 block array
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(m.Content, &blocks); err == nil {
+		var sb strings.Builder
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				if stripInjected {
+					cleaned := extract.StripInjectedContent(b.Text)
+					if cleaned != "" && !extract.IsInjectedBlock(cleaned) {
+						sb.WriteString(cleaned)
+					}
+				} else {
+					sb.WriteString(b.Text)
+				}
+			}
+		}
+		return sb.String()
+	}
+	return ""
 }
 
 func parseTime(s string) (time.Time, bool) {
@@ -262,23 +299,6 @@ func (a *Adapter) LoadMessages(
 		msgs = msgs[len(msgs)-opts.Limit:]
 	}
 	return &sliceIterator{msgs: msgs}, nil
-}
-
-func messageText(l *line) string {
-	if len(l.Message) == 0 {
-		return ""
-	}
-	var m struct {
-		Content json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(l.Message, &m); err != nil {
-		return ""
-	}
-	var str string
-	if err := json.Unmarshal(m.Content, &str); err == nil {
-		return str
-	}
-	return ""
 }
 
 type sliceIterator struct {

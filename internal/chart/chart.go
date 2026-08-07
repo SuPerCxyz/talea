@@ -273,6 +273,12 @@ func Line(points []float64, width int) string {
 	var sb strings.Builder
 	for _, v := range sampled {
 		idx := int(float64(len(barsRunes)-1) * v / maxV)
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(barsRunes) {
+			idx = len(barsRunes) - 1
+		}
 		sb.WriteString(string(barsRunes[idx]))
 	}
 	return sb.String()
