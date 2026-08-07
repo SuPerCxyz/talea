@@ -18,17 +18,26 @@ builds:
       - -X github.com/talea/talea/internal/version.BuildDate={{.Date}}
     goos:
       - linux
+      - darwin
+      - windows
     goarch:
       - amd64
       - arm64
 
 archives:
-  - formats: [tar.gz]
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
     files:
       - README.md
       - README.zh-CN.md
       - LICENSE
       - assets/talea-logo.png
+
+checksum:
+  name_template: "checksums.txt"
 
 changelog:
   sort: asc

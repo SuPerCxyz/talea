@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12.2
@@ -28,30 +28,35 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version-file: go.mod
       - run: go vet ./...
       - run: go test ./...
 
   build:
-    name: Build
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [amd64, arm64]
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
-      - run: |
-          GOOS=linux GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -o bin/talea ./cmd/talea
-          tar -czf talea-linux-${{ matrix.arch }}.tar.gz -C bin talea
-      - run: sha256sum talea-linux-${{ matrix.arch }}.tar.gz >> checksums.txt
+          go-version-file: go.mod
+      - name: Cross-compile
+        run: |
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} CGO_ENABLED=0 \
+            go build -ldflags '-s -w' -o bin/talea${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/talea
+      - name: Archive
+        run: |
+          cd bin
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -r ../talea-${{ matrix.goos }}-${{ matrix.goarch }}.zip talea.exe
+          else
+            tar -czf ../talea-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz talea
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: talea-linux-${{ matrix.arch }}
-          path: talea-linux-${{ matrix.arch }}.tar.gz
-      - uses: actions/upload-artifact@v4
-        with:
-          name: checksums
-          path: checksums.txt
+          name: talea-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: talea-${{ matrix.goos }}-${{ matrix.goarch }}.*

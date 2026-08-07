@@ -52,14 +52,29 @@ Talea 统一索引本机所有 AI Coding Agent 的会话历史，让你无需记
 
 ### 预编译二进制
 
-从 [Releases 页面](https://github.com/SuPerCxyz/talea/releases) 下载
-`talea_<版本>_linux_<arch>.tar.gz` 及 checksums（amd64 / arm64）：
+从 [Releases 页面](https://github.com/SuPerCxyz/talea/releases) 下载对应平台的压缩包：
+
+| 平台 | 压缩包 |
+|------|--------|
+| Linux amd64 | `talea_*_linux_amd64.tar.gz` |
+| Linux arm64 | `talea_*_linux_arm64.tar.gz` |
+| macOS amd64 | `talea_*_darwin_amd64.tar.gz` |
+| macOS arm64 (Apple Silicon) | `talea_*_darwin_arm64.tar.gz` |
+| Windows amd64 | `talea_*_windows_amd64.zip` |
+| Windows arm64 | `talea_*_windows_arm64.zip` |
+
+**Linux / macOS：**
 
 ```sh
 tar xzf talea_*.tar.gz
 sudo install -m 0755 talea /usr/local/bin/talea
 talea version
 ```
+
+**Windows：**
+
+解压 zip 中的 `talea.exe`，将其所在目录加入 `PATH`，或移动到已在 `PATH` 中的目录。
+在终端运行 `talea version` 验证。
 
 ### 源码构建
 
@@ -69,7 +84,7 @@ talea version
 git clone https://github.com/SuPerCxyz/talea.git
 cd talea
 make build
-sudo install -m 0755 bin/talea /usr/local/bin/talea
+sudo install -m 0755 bin/talea /usr/local/bin/talea   # Linux/macOS
 ```
 
 ## 快速开始

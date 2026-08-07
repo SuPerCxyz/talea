@@ -55,14 +55,30 @@ agents' data — it reads them **read-only** and keeps everything **local**.
 
 ### Prebuilt binaries
 
-Download the latest `talea_<version>_linux_<arch>.tar.gz` and its checksums from the
-[Releases page](https://github.com/SuPerCxyz/talea/releases) (amd64 and arm64), then:
+Download the latest archive for your platform from the
+[Releases page](https://github.com/SuPerCxyz/talea/releases):
+
+| Platform | Archive |
+|----------|---------|
+| Linux amd64 | `talea_*_linux_amd64.tar.gz` |
+| Linux arm64 | `talea_*_linux_arm64.tar.gz` |
+| macOS amd64 | `talea_*_darwin_amd64.tar.gz` |
+| macOS arm64 (Apple Silicon) | `talea_*_darwin_arm64.tar.gz` |
+| Windows amd64 | `talea_*_windows_amd64.zip` |
+| Windows arm64 | `talea_*_windows_arm64.zip` |
+
+**Linux / macOS:**
 
 ```sh
 tar xzf talea_*.tar.gz
 sudo install -m 0755 talea /usr/local/bin/talea
 talea version
 ```
+
+**Windows:**
+
+Extract `talea.exe` from the zip, then add the folder to your `PATH` or move it
+to a directory already in `PATH`. Run `talea version` in a terminal to verify.
 
 ### Build from source
 
@@ -72,7 +88,7 @@ Requires Go 1.25+ (no cgo, no external dependencies):
 git clone https://github.com/SuPerCxyz/talea.git
 cd talea
 make build
-sudo install -m 0755 bin/talea /usr/local/bin/talea
+sudo install -m 0755 bin/talea /usr/local/bin/talea   # Linux/macOS
 ```
 
 ## Quick Start
