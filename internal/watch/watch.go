@@ -32,7 +32,7 @@ func Run(ctx context.Context, a *app.App, opts Options) error {
 	defer func() { _ = watcher.Close() }()
 
 	// 收集要监听的目录
-	dirs := dataDirs(a)
+	dirs := dataDirs(ctx, a)
 	if len(dirs) == 0 {
 		return fmt.Errorf("没有可监听的 Agent 数据目录")
 	}
@@ -121,9 +121,9 @@ func runIndex(ctx context.Context, a *app.App, db *index.DB) {
 }
 
 // dataDirs 收集各 Agent 数据目录。
-func dataDirs(a *app.App) []string {
+func dataDirs(ctx context.Context, a *app.App) []string {
 	var dirs []string
-	insts, err := a.DetectInstances(context.Background())
+	insts, err := a.DetectInstances(ctx)
 	if err != nil {
 		return dirs
 	}

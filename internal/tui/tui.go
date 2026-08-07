@@ -162,6 +162,9 @@ func Run(ctx context.Context, dir string) error {
 	if m.picked != nil {
 		if rerr := resumeSession(ctx, a, m.picked, "", false); rerr != nil {
 			fmt.Fprintln(os.Stderr, "talea:", rerr)
+			if err == nil {
+				err = rerr
+			}
 		}
 	}
 	return err

@@ -254,8 +254,10 @@ func ByIDPrefix(ctx context.Context, db *index.DB, prefix, agent string, limit i
 	if limit <= 0 {
 		limit = 50
 	}
-	where := `s.session_id LIKE ?`
-	args := []any{prefix + "%"}
+	// 转义 LIKE 通配符，确保前缀匹配精确
+	escapedPrefix := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(prefix)
+	where := `s.session_id LIKE ? ESCAPE '\'`
+	args := []any{escapedPrefix + "%"}
 	if agent != "" {
 		where += ` AND s.agent_id = ?`
 		args = append(args, agent)
