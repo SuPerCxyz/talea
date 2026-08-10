@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
@@ -155,6 +156,59 @@ func TestItemTitleWithUsage(t *testing.T) {
 	if !strings.Contains(title, "Cache") || !strings.Contains(title, "89%") {
 		t.Errorf("title 应包含缓存命中率, got: %q", title)
 	}
+	// 固定列宽对齐验证：不同会话的相同 Key 起始位置应一致（按显示宽度）
+	s2 := &model.Session{
+		AgentID:          model.AgentOpenCode,
+		SessionID:        "s2",
+		StartedAt:        &[]time.Time{time.Now()}[0],
+		EndedAt:          &[]time.Time{time.Now()}[0],
+		Duration:         &[]time.Duration{2 * time.Minute}[0],
+		WorkingDirectory: "/very/long/path/that/exceeds/twenty/chars",
+		GitBranch:        "feature-a-very-long-branch-name",
+	}
+	it2 := item{sess: s2, hasUs: true, usage: timeline.SessionUsageRow{TotalTokens: &in, CacheRead: &cr, CacheWrite: &cw}}
+	t1, t2 := itemTitle(it), itemTitle(it2)
+	// 总显示宽度应一致
+	if runewidth.StringWidth(t1) != runewidth.StringWidth(t2) {
+		t.Errorf("两行显示宽度不一致: t1=%d t2=%d", runewidth.StringWidth(t1), runewidth.StringWidth(t2))
+	}
+	// 每个 Key 的显示起始位置一致
+	p1, p2 := keyPositions(t1), keyPositions(t2)
+	for _, key := range []string{"Start", "End", "Time", "Token", "Cache", "Path", "Branch"} {
+		if p1[key] != p2[key] {
+			t.Errorf("Key %q 未对齐: t1 pos=%d t2 pos=%d\nt1=%q\nt2=%q", key, p1[key], p2[key], t1, t2)
+		}
+	}
+}
+
+// keyPositions 返回行中各元数据 Key 的显示宽度起始位置。
+func keyPositions(line string) map[string]int {
+	keys := []string{"Start", "End", "Time", "Token", "Cache", "Path", "Branch"}
+	out := map[string]int{}
+	for _, key := range keys {
+		out[key] = -1
+	}
+	rs := []rune(line)
+	cur := 0
+	// 逐字符扫描，遇到 Key 时记录位置并跳过
+	for i := 0; i < len(rs); {
+		consumed := false
+		for _, key := range keys {
+			kr := []rune(key)
+			if i+len(kr) <= len(rs) && string(rs[i:i+len(kr)]) == key && out[key] < 0 {
+				out[key] = cur
+				cur += runewidth.StringWidth(key)
+				i += len(kr)
+				consumed = true
+				break
+			}
+		}
+		if !consumed {
+			cur += runewidth.RuneWidth(rs[i])
+			i++
+		}
+	}
+	return out
 }
 
 func TestMainModelInit(t *testing.T) {

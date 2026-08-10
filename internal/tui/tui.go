@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
@@ -375,32 +376,111 @@ func indexOf(items []list.Item, id string) int {
 	return -1
 }
 
-// itemTitle 渲染列表第一行：agent + 时间 + 使用情况（Token / 缓存命中率）。
+// itemTitle 渲染列表第一行：agent + 固定列宽元数据（Start/End/Time/Token/Path/Branch）。
+// 布局：每个字段 = Key + 1空格 + Value，整体占固定列宽；字段间 4 空格大间隔。
+// 各字段起始位置固定，Value 超长截断，保证多行纵向对齐。
 func itemTitle(it item) string {
 	s := it.sess
-	agent := displayAgent(s.AgentID)
-	timeStr := ""
-	if s.StartedAt != nil {
-		timeStr = s.StartedAt.Format("01-02 15:04")
+	agent := padDisplay(displayAgent(s.AgentID), 10)
+	meta := metaLine(s, it.usage, it.hasUs)
+	return "[" + agent + "] " + meta
+}
+
+// metaWidths 定义元数据各字段的固定列宽（Value 区显示宽度）。
+const (
+	metaKeyW      = 6   // Key 区宽（"Branch" 最长 6）
+	metaValStart  = 11  // Start/End：MM-DD HH:MM
+	metaValTime   = 10  // Time：127h31m / 2m
+	metaValToken  = 8   // Token：11.15M / 36.5K
+	metaValCache  = 6   // Cache：99%
+	metaValPath   = 20  // Path：截断
+	metaValBranch = 12  // Branch：截断
+	metaGap       = 4   // 字段间大间隔
+)
+
+// metaField 渲染单个 Key+Value 字段（Key 左对齐补宽 + 1 空格 + Value 精确截断补宽）。
+func metaField(key, val string, valW int) string {
+	k := padDisplay(key, metaKeyW)
+	return k + " " + truncPad(val, valW)
+}
+
+// truncPad 按显示宽度精确截断并左对齐补齐，保证返回宽度 == w。
+func truncPad(s string, w int) string {
+	sw := runewidth.StringWidth(s)
+	if sw <= w {
+		return s + strings.Repeat(" ", w-sw)
 	}
-	var sb strings.Builder
-	sb.WriteString("[")
-	sb.WriteString(padDisplay(agent, 10))
-	sb.WriteString("] ")
-	sb.WriteString(timeStr)
-	if it.hasUs {
-		sb.WriteString("  ")
-		sb.WriteString(i18n.Tr("Token", "Token"))
-		sb.WriteString(" ")
-		sb.WriteString(humanNum(valOr(it.usage.TotalTokens)))
-		if rate := timeline.CacheHitRate(it.usage); rate >= 0 {
-			sb.WriteString("  ")
-			sb.WriteString(i18n.Tr("Cache", "缓存"))
-			sb.WriteString(" ")
-			sb.WriteString(fmt.Sprintf("%.0f%%", rate*100))
+	// 需要截断：保留 w-1 宽内容 + "…"（1 宽）
+	buf := []rune(s)
+	cur := 0
+	keep := make([]rune, 0, len(buf))
+	for _, r := range buf {
+		rw := runewidth.RuneWidth(r)
+		if cur+rw > w-1 {
+			break
+		}
+		keep = append(keep, r)
+		cur += rw
+	}
+	return string(keep) + "…"
+}
+
+// metaLine 渲染 Start/End/Time/Token/Path/Branch 固定列宽元数据行。
+func metaLine(s *model.Session, u timeline.SessionUsageRow, hasUs bool) string {
+	start := "--"
+	if s.StartedAt != nil {
+		start = s.StartedAt.Format("01-02 15:04")
+	}
+	end := "--"
+	if s.EndedAt != nil {
+		end = s.EndedAt.Format("01-02 15:04")
+	}
+	dur := "--"
+	if s.Duration != nil {
+		dur = compactDur(*s.Duration)
+	}
+	tok := "--"
+	if hasUs {
+		tok = humanNum(valOr(u.TotalTokens))
+	}
+	cache := "--"
+	if hasUs {
+		if rate := timeline.CacheHitRate(u); rate >= 0 {
+			cache = fmt.Sprintf("%.0f%%", rate*100)
 		}
 	}
-	return sb.String()
+	path := "--"
+	if s.WorkingDirectory != "" {
+		path = s.WorkingDirectory
+	}
+	branch := "--"
+	if s.GitBranch != "" {
+		branch = s.GitBranch
+	}
+	fields := []string{
+		metaField("Start", start, metaValStart),
+		metaField("End", end, metaValStart),
+		metaField("Time", dur, metaValTime),
+		metaField("Token", tok, metaValToken),
+		metaField("Cache", cache, metaValCache),
+		metaField("Path", path, metaValPath),
+		metaField("Branch", branch, metaValBranch),
+	}
+	return strings.Join(fields, strings.Repeat(" ", metaGap))
+}
+
+// compactDur 输出紧凑时长（不受语言影响，保证固定列宽），如 127h31m / 2m / 45s。
+func compactDur(d time.Duration) string {
+	total := int64(d / time.Second)
+	if total < 60 {
+		return fmt.Sprintf("%ds", total)
+	}
+	h := total / 3600
+	m := (total % 3600) / 60
+	if h > 0 {
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+	return fmt.Sprintf("%dm", m)
 }
 
 // itemDesc 渲染列表第二、三行：首次提问与最近一次用户消息。
