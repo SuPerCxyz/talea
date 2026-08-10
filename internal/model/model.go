@@ -95,6 +95,9 @@ type Session struct {
 	FirstQuestionSource     string  `json:"first_question_source"`
 	FirstQuestionConfidence float64 `json:"first_question_confidence"`
 
+	// LastUserPrompt 是会话最后一次用户消息的预览（TUI 展示用，非持久化字段）。
+	LastUserPrompt string `json:"last_user_prompt,omitempty"`
+
 	StartedAt       *time.Time     `json:"started_at"`
 	EndedAt         *time.Time     `json:"ended_at"`
 	LastActivityAt  *time.Time     `json:"last_activity_at"`

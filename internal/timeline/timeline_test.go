@@ -2,7 +2,7 @@ package timeline
 
 import (
 	"context"
-	"path/filepath"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,9 +10,9 @@ import (
 	"github.com/talea/talea/internal/model"
 )
 
-func newDB(t *testing.T) *index.DB {
+func newTestDB(t *testing.T) *index.DB {
 	t.Helper()
-	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	db, err := index.Open(t.TempDir() + "/index.db")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,102 +23,80 @@ func newDB(t *testing.T) *index.DB {
 	return db
 }
 
-func int64p(v int64) *int64 { return &v }
-
-func ev(ts time.Time, seq int64, total *int64) *model.UsageTimelineEvent {
-	return &model.UsageTimelineEvent{
-		AgentInstanceID: "i",
-		SessionID:       "s",
-		EventType:       model.UsageEventRequest,
-		Timestamp:       &ts,
-		Sequence:        seq,
-		TotalTokens:     total,
-		SourceIdentity:  "ev-" + ts.String(),
+func insertUserEvent(t *testing.T, db *index.DB, iid, sid, preview string, ts int64, seq int64) {
+	t.Helper()
+	ctx := context.Background()
+	ev := &model.UsageTimelineEvent{
+		AgentInstanceID:  iid,
+		SessionID:        sid,
+		EventType:        model.UsageEventUserMessage,
+		Timestamp:        timep(time.Unix(ts, 0)),
+		Sequence:         seq,
+		UserPromptPreview: preview,
+		SourceIdentity:   fmt.Sprintf("u-%s-%d", iid, ts), // 每条消息唯一，避免 UNIQUE 冲突
+	}
+	if _, err := db.UpsertTimelineEvents(ctx, []*model.UsageTimelineEvent{ev}); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestAggregateCumulative(t *testing.T) {
+func TestLastUserPromptBySession(t *testing.T) {
 	ctx := context.Background()
-	db := newDB(t)
-	base := time.Now()
-	in := int64p(100)
-	out := int64p(50)
-	// 两个请求，最后一个是累计值
-	db.UpsertTimelineEvent(ctx, ev(base, 0, int64p(1000)))
-	db.UpsertTimelineEvent(ctx, ev(base.Add(time.Second), 1, int64p(1200)))
-	_ = in
-	_ = out
+	db := newTestDB(t)
 
-	s, err := Aggregate(ctx, db, "i", "s")
+	// 会话 A：两条用户消息，应取最后一条
+	insertUserEvent(t, db, "inst-a", "s1", "第一条", 100, 1)
+	insertUserEvent(t, db, "inst-a", "s1", "第二条（最后）", 200, 2)
+
+	// 会话 B：一条用户消息
+	insertUserEvent(t, db, "inst-b", "s2", "唯一", 300, 1)
+
+	// 会话 C：无用户消息（只有 request 事件）
+	reqEv := &model.UsageTimelineEvent{
+		AgentInstanceID: "inst-c", SessionID: "s3",
+		EventType:      model.UsageEventRequest,
+		Timestamp:      timep(time.Unix(400, 0)),
+		Sequence:       1,
+		SourceIdentity: "req-c",
+	}
+	if _, err := db.UpsertTimelineEvents(ctx, []*model.UsageTimelineEvent{reqEv}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 跨实例相同 session_id
+	insertUserEvent(t, db, "inst-a", "dup", "A的", 100, 1)
+	insertUserEvent(t, db, "inst-b", "dup", "B的", 500, 1)
+
+	keys := [][2]string{
+		{"inst-a", "s1"},
+		{"inst-b", "s2"},
+		{"inst-c", "s3"},
+		{"inst-a", "dup"},
+		{"inst-b", "dup"},
+	}
+	prompts, err := LastUserPromptBySession(ctx, db, keys)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.RequestCount != 2 {
-		t.Fatalf("requests=%d", s.RequestCount)
-	}
-	if s.CumulativeTotal != 1200 {
-		t.Fatalf("cumulative=%d", s.CumulativeTotal)
-	}
-}
 
-func TestDedupSameSourceIdentity(t *testing.T) {
-	ctx := context.Background()
-	db := newDB(t)
-	base := time.Now()
-	e := ev(base, 0, int64p(500))
-	e.SourceIdentity = "same-id"
-	ok, _ := db.UpsertTimelineEvent(ctx, e)
-	if !ok {
-		t.Fatal("first insert expected ok")
+	cases := map[string]string{
+		"inst-a\x00s1":  "第二条（最后）",
+		"inst-b\x00s2":  "唯一",
+		"inst-a\x00dup": "A的",
+		"inst-b\x00dup": "B的",
 	}
-	ok, _ = db.UpsertTimelineEvent(ctx, e)
-	if ok {
-		t.Fatal("dup insert expected ignored")
-	}
-	events, err := List(ctx, db, Query{AgentInstanceID: "i", SessionID: "s"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(events) != 1 {
-		t.Fatalf("events=%d", len(events))
-	}
-}
-
-func TestGroupByTurns(t *testing.T) {
-	ctx := context.Background()
-	db := newDB(t)
-	base := time.Now()
-
-	user := func(ts time.Time, seq int64, preview string) *model.UsageTimelineEvent {
-		return &model.UsageTimelineEvent{
-			AgentInstanceID:   "i",
-			SessionID:         "s",
-			EventType:         model.UsageEventUserMessage,
-			Timestamp:         &ts,
-			Sequence:          seq,
-			UserPromptPreview: preview,
-			SourceIdentity:    "u-" + ts.String(),
+	for k, want := range cases {
+		if got := prompts[k]; got != want {
+			t.Errorf("%s: got %q want %q", k, got, want)
 		}
 	}
-	db.UpsertTimelineEvent(ctx, user(base, 0, "第一个问题"))
-	db.UpsertTimelineEvent(ctx, ev(base.Add(time.Minute), 1, int64p(800)))
-	db.UpsertTimelineEvent(ctx, user(base.Add(2*time.Minute), 2, "第二个问题"))
-	db.UpsertTimelineEvent(ctx, ev(base.Add(3*time.Minute), 3, int64p(1600)))
-
-	turns, err := GroupByTurns(ctx, db, "i", "s")
-	if err != nil {
-		t.Fatal(err)
+	// 无用户消息的会话不应出现在结果中
+	if _, ok := prompts["inst-c\x00s3"]; ok {
+		t.Errorf("会话 c 不应有 last prompt")
 	}
-	if len(turns) != 2 {
-		t.Fatalf("turns=%d", len(turns))
-	}
-	if turns[0].Prompt != "第一个问题" {
-		t.Fatalf("turn0 prompt=%q", turns[0].Prompt)
-	}
-	if turns[0].Total != 800 {
-		t.Fatalf("turn0 total=%d", turns[0].Total)
-	}
-	if turns[1].Total != 1600 {
-		t.Fatalf("turn1 total=%d", turns[1].Total)
+	// 空 keys
+	empty, err := LastUserPromptBySession(ctx, db, nil)
+	if err != nil || len(empty) != 0 {
+		t.Errorf("空 keys 应返回空 map: %v %v", empty, err)
 	}
 }

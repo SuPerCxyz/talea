@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +96,7 @@ func TestSessionTitleAndDesc(t *testing.T) {
 		AgentID:          model.AgentClaudeCode,
 		SessionID:        "abc",
 		FirstQuestion:    "分析 multipath 残留",
+		LastUserPrompt:   "帮我看看最新的 multipath 配置",
 		WorkingDirectory: "/home/alice/code/x",
 		StartedAt:        &start,
 		Duration:         &d,
@@ -103,8 +105,28 @@ func TestSessionTitleAndDesc(t *testing.T) {
 	if title := sessionTitle(s); title == "" {
 		t.Fatal("empty title")
 	}
-	if desc := sessionDesc(s); desc == "" {
+	desc := sessionDesc(s)
+	if desc == "" {
 		t.Fatal("empty desc")
+	}
+	// 最近用户消息应出现在描述中
+	if !strings.Contains(desc, "multipath 配置") {
+		t.Errorf("desc 应包含最近用户消息, got: %q", desc)
+	}
+}
+
+func TestItemFilterValue(t *testing.T) {
+	it := item{title: "t", sess: &model.Session{
+		FirstQuestion: "q", SessionID: "s", AgentID: model.AgentOpenCode,
+		WorkingDirectory: "/home/alice/code/x",
+	}}
+	fv := it.FilterValue()
+	if fv == "" {
+		t.Fatal("empty filter")
+	}
+	// 按目录搜索应能匹配
+	if !strings.Contains(fv, "/home/alice/code/x") {
+		t.Errorf("FilterValue 应包含工作目录, got: %q", fv)
 	}
 }
 
@@ -119,15 +141,6 @@ func TestMainModelInit(t *testing.T) {
 	}
 	_ = m.Init()
 	_ = m.View()
-}
-
-func TestItemFilterValue(t *testing.T) {
-	it := item{title: "t", sess: &model.Session{
-		FirstQuestion: "q", SessionID: "s", AgentID: model.AgentOpenCode,
-	}}
-	if it.FilterValue() == "" {
-		t.Fatal("empty filter")
-	}
 }
 
 func TestDetailRenderEmptyDB(t *testing.T) {

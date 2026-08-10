@@ -24,6 +24,7 @@ import (
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/resume"
 	"github.com/talea/talea/internal/search"
+	"github.com/talea/talea/internal/timeline"
 )
 
 // 高对比度配色：统一使用 AdaptiveColor 适配深浅终端背景，
@@ -110,7 +111,42 @@ func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) 
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return endTs(sessions[i]) > endTs(sessions[j])
 	})
+	// 批量填充最近一次用户消息（供 TUI 展示）
+	fillLastUserPrompts(ctx, db, sessions)
 	return sessions, nil
+}
+
+// fillLastUserPrompts 批量查询会话的最后一次用户消息并写入 LastUserPrompt。
+func fillLastUserPrompts(ctx context.Context, db *index.DB, sessions []*model.Session) {
+	if db == nil || len(sessions) == 0 {
+		return
+	}
+	keys := make([][2]string, 0, len(sessions))
+	seen := map[string]int{}
+	for _, s := range sessions {
+		if s.SessionID == "" {
+			continue
+		}
+		key := s.AgentInstanceID + "\x00" + s.SessionID
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = len(keys)
+		keys = append(keys, [2]string{s.AgentInstanceID, s.SessionID})
+	}
+	prompts, err := timeline.LastUserPromptBySession(ctx, db, keys)
+	if err != nil {
+		return
+	}
+	for _, s := range sessions {
+		if s.SessionID == "" {
+			continue
+		}
+		key := s.AgentInstanceID + "\x00" + s.SessionID
+		if p, ok := prompts[key]; ok {
+			s.LastUserPrompt = p
+		}
+	}
 }
 
 // endTs 返回会话结束时间的 Unix 秒（无结束时间依次用开始时间、最后活动时间兜底）。
@@ -245,7 +281,8 @@ type item struct {
 func (i item) Title() string       { return i.title }
 func (i item) Description() string { return i.desc }
 func (i item) FilterValue() string {
-	return i.sess.FirstQuestion + " " + string(i.sess.AgentID) + " " + i.sess.SessionID
+	return i.sess.FirstQuestion + " " + string(i.sess.AgentID) + " " +
+		i.sess.SessionID + " " + i.sess.WorkingDirectory
 }
 
 func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *index.DB, dir string) *mainModel {
@@ -320,6 +357,10 @@ func sessionDesc(s *model.Session) string {
 		valW  int // 值占位宽度（不足补空格，0 不限制）
 	}
 	var segs []seg
+	if s.LastUserPrompt != "" {
+		// 最近一次用户消息（单行截断，突出显示最新对话）
+		segs = append(segs, seg{i18n.Tr("Last", "最近"), truncRunes(firstLine(s.LastUserPrompt), 48), 0})
+	}
 	if s.StartedAt != nil {
 		segs = append(segs, seg{i18n.Tr("Start", "开始"), s.StartedAt.Format("01-02 15:04"), 11})
 	}

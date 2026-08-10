@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/talea/talea/internal/index"
@@ -108,6 +109,53 @@ func nn(v sql.NullInt64) *int64 {
 	}
 	x := v.Int64
 	return &x
+}
+
+// LastUserPromptBySession 批量查询多个会话的最后一条用户消息预览。
+// key 为 agent_instance_id\x00session_id；无 user_message 事件的会话不出现在结果中。
+func LastUserPromptBySession(ctx context.Context, db *index.DB, keys [][2]string) (map[string]string, error) {
+	out := make(map[string]string, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	var sb strings.Builder
+	sb.WriteString("(")
+	args := make([]any, 0, len(keys)*2)
+	for i, k := range keys {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("(?,?)")
+		args = append(args, k[0], k[1])
+	}
+	sb.WriteString(")")
+	// 取每个会话最后一条 user_message 事件（timestamp+sequence 最大）
+	rows, err := db.SQL().QueryContext(ctx, `
+		SELECT t.agent_instance_id, t.session_id, t.user_prompt_preview
+		FROM usage_timeline_events t
+		JOIN (
+			SELECT agent_instance_id, session_id,
+			       MAX(timestamp || printf('%020d', sequence)) AS key
+			FROM usage_timeline_events
+			WHERE event_type='user_message' AND user_prompt_preview IS NOT NULL
+			GROUP BY agent_instance_id, session_id
+		) m ON m.agent_instance_id = t.agent_instance_id
+		   AND m.session_id = t.session_id
+		   AND (t.timestamp || printf('%020d', t.sequence)) = m.key
+		WHERE (t.agent_instance_id, t.session_id) IN `+sb.String(),
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var iid, sid, preview string
+		if err := rows.Scan(&iid, &sid, &preview); err != nil {
+			continue
+		}
+		out[iid+"\x00"+sid] = preview
+	}
+	return out, rows.Err()
 }
 
 // Summary 是时间线聚合汇总。
