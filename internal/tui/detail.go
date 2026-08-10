@@ -3,8 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -616,21 +614,6 @@ func humanDur(d time.Duration) string {
 		return i18n.Trf("%dh%dm", "%d小时%d分", h, m)
 	}
 	return i18n.Trf("%dm", "%d分", m)
-}
-
-func shortHome(p string) string {
-	if p == "" {
-		return ""
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return p
-	}
-	rel, err := filepath.Rel(home, p)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return p
-	}
-	return filepath.Join("~", rel)
 }
 
 func firstLine(s string) string {

@@ -16,6 +16,7 @@ import (
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/search"
+	"github.com/talea/talea/internal/timeline"
 )
 
 // mkTuiSession 构造测试会话。
@@ -64,7 +65,7 @@ func TestLoadTuiSessionsDirFilter(t *testing.T) {
 	reg := adapters.NewRegistry()
 	a := &app.App{Registry: reg, Config: cfg}
 
-	all, err := loadTuiSessions(ctx, a, db, "")
+	all, _, err := loadTuiSessions(ctx, a, db, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestLoadTuiSessionsDirFilter(t *testing.T) {
 		t.Fatalf("no dir filter: got %d sessions, want 3", len(all))
 	}
 
-	filtered, err := loadTuiSessions(ctx, a, db, "/home/user/nexora")
+	filtered, _, err := loadTuiSessions(ctx, a, db, "/home/user/nexora")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +81,7 @@ func TestLoadTuiSessionsDirFilter(t *testing.T) {
 		t.Fatalf("dir filter: got %d sessions, want 2", len(filtered))
 	}
 
-	sub, err := loadTuiSessions(ctx, a, db, "/home/user/nexora/frontend")
+	sub, _, err := loadTuiSessions(ctx, a, db, "/home/user/nexora/frontend")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,14 +103,18 @@ func TestSessionTitleAndDesc(t *testing.T) {
 		Duration:         &d,
 		Activity:         model.ActivityInactive,
 	}
-	if title := sessionTitle(s); title == "" {
+	it := item{sess: s}
+	if title := itemTitle(it); title == "" {
 		t.Fatal("empty title")
 	}
-	desc := sessionDesc(s)
+	desc := itemDesc(it)
 	if desc == "" {
 		t.Fatal("empty desc")
 	}
-	// 最近用户消息应出现在描述中
+	// 首次提问与最近用户消息都应出现在描述中
+	if !strings.Contains(desc, "multipath 残留") {
+		t.Errorf("desc 应包含首次提问, got: %q", desc)
+	}
 	if !strings.Contains(desc, "multipath 配置") {
 		t.Errorf("desc 应包含最近用户消息, got: %q", desc)
 	}
@@ -130,12 +135,34 @@ func TestItemFilterValue(t *testing.T) {
 	}
 }
 
+func TestItemTitleWithUsage(t *testing.T) {
+	in := int64(1_000_000)
+	cr := int64(800_000)
+	cw := int64(100_000)
+	it := item{
+		sess:  &model.Session{AgentID: model.AgentOpenCode, SessionID: "s", StartedAt: &[]time.Time{time.Now()}[0]},
+		hasUs: true,
+		usage: timeline.SessionUsageRow{TotalTokens: &in, CacheRead: &cr, CacheWrite: &cw},
+	}
+	title := itemTitle(it)
+	if title == "" {
+		t.Fatal("empty title with usage")
+	}
+	if !strings.Contains(title, "Token") || !strings.Contains(title, "1.00M") {
+		t.Errorf("title 应包含 Token 汇总, got: %q", title)
+	}
+	// 缓存命中率: 800k / (0 + 800k + 100k) = 88.9%
+	if !strings.Contains(title, "Cache") || !strings.Contains(title, "89%") {
+		t.Errorf("title 应包含缓存命中率, got: %q", title)
+	}
+}
+
 func TestMainModelInit(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
 	reg := adapters.NewRegistry()
 	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
-	m := newMain(ctx, a, nil, nil, "")
+	m := newMain(ctx, a, nil, nil, nil, "")
 	if m == nil {
 		t.Fatal("nil model")
 	}
@@ -161,7 +188,7 @@ func TestFilterModeIgnoresFunctionKeys(t *testing.T) {
 	reg := adapters.NewRegistry()
 	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
 	s := mkTuiSession("ses_1", "/home/user/nexora")
-	m := newMain(ctx, a, []*model.Session{s}, nil, "")
+	m := newMain(ctx, a, []*model.Session{s}, nil, nil, "")
 
 	// 进入过滤模式：list 收到 "/" 后状态变为 Filtering
 	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
@@ -283,7 +310,7 @@ func TestLoadTuiSessionsTimeSort(t *testing.T) {
 	reg := adapters.NewRegistry()
 	a := &app.App{Registry: reg, Config: cfg}
 
-	sessions, err := loadTuiSessions(ctx, a, db, "")
+	sessions, _, err := loadTuiSessions(ctx, a, db, "")
 	if err != nil {
 		t.Fatal(err)
 	}

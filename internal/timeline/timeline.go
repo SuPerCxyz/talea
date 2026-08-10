@@ -111,6 +111,85 @@ func nn(v sql.NullInt64) *int64 {
 	return &x
 }
 
+// SessionUsageRow 是列表展示所需的会话 Token 汇总。
+type SessionUsageRow struct {
+	InputTokens   *int64
+	OutputTokens  *int64
+	TotalTokens   *int64
+	CacheRead     *int64
+	CacheWrite    *int64
+	Reasoning     *int64
+	RequestCount  *int64
+}
+
+// UsageBySession 批量查询多个会话的 Token 汇总（含缓存字段）。
+// key 为 agent_instance_id\x00session_id；无 usage 的会话不出现在结果中。
+func UsageBySession(ctx context.Context, db *index.DB, keys [][2]string) (map[string]SessionUsageRow, error) {
+	out := make(map[string]SessionUsageRow, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	var sb strings.Builder
+	sb.WriteString("(")
+	args := make([]any, 0, len(keys)*2)
+	for i, k := range keys {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("(?,?)")
+		args = append(args, k[0], k[1])
+	}
+	sb.WriteString(")")
+	rows, err := db.SQL().QueryContext(ctx, `
+		SELECT agent_instance_id, session_id,
+		       input_tokens, output_tokens, total_tokens,
+		       cache_read_tokens, cache_write_tokens, reasoning_tokens, request_count
+		FROM session_usage
+		WHERE (agent_instance_id, session_id) IN `+sb.String(),
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			iid, sid                      string
+			in, ot, tot, cr, cw, re, req sql.NullInt64
+		)
+		if err := rows.Scan(&iid, &sid, &in, &ot, &tot, &cr, &cw, &re, &req); err != nil {
+			continue
+		}
+		out[iid+"\x00"+sid] = SessionUsageRow{
+			InputTokens:  nn(in),
+			OutputTokens: nn(ot),
+			TotalTokens:  nn(tot),
+			CacheRead:    nn(cr),
+			CacheWrite:   nn(cw),
+			Reasoning:    nn(re),
+			RequestCount: nn(req),
+		}
+	}
+	return out, rows.Err()
+}
+
+// CacheHitRate 计算缓存命中率（0~1），无数据返回 -1。
+// 定义：cache_read / (input + cache_read + cache_write)。
+func CacheHitRate(u SessionUsageRow) float64 {
+	in, cr, cw := val(u.InputTokens), val(u.CacheRead), val(u.CacheWrite)
+	total := in + cr + cw
+	if total <= 0 {
+		return -1
+	}
+	return float64(cr) / float64(total)
+}
+
+func val(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
 // LastUserPromptBySession 批量查询多个会话的最后一条用户消息预览。
 // key 为 agent_instance_id\x00session_id；无 user_message 事件的会话不出现在结果中。
 func LastUserPromptBySession(ctx context.Context, db *index.DB, keys [][2]string) (map[string]string, error) {

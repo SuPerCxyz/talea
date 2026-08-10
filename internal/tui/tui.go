@@ -35,9 +35,10 @@ var (
 			Foreground(lipgloss.AdaptiveColor{Light: "#C2185B", Dark: "#FF9E80"})
 )
 
-// newListDelegate 返回高对比度的列表项样式。
+// newListDelegate 返回高对比度的列表项样式（每项 3 行：agent+usage / 首问 / 最近消息）。
 func newListDelegate() list.DefaultDelegate {
 	d := list.NewDefaultDelegate()
+	d.SetHeight(3)
 	s := d.Styles
 
 	normalFG := lipgloss.AdaptiveColor{Light: "#1a1a1a", Dark: "#f0f0f0"}
@@ -98,10 +99,11 @@ const bullet = "•"
 // loadTuiSessions 加载 TUI 会话列表，dir 非空时仅保留该目录前缀下的会话。
 // 固定按结束时间倒序排列（最新结束在前），不受配置 default_sort 影响，
 // 与 talea list / talea go 保持一致。
-func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) ([]*model.Session, error) {
+// 返回会话列表及对应的 usage 汇总（key=agent_instance_id\x00session_id）。
+func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) ([]*model.Session, map[string]timeline.SessionUsageRow, error) {
 	results, err := search.List(ctx, db, search.Query{Cwd: dir, Limit: 500})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sessions := make([]*model.Session, 0, len(results))
 	for i := range results {
@@ -111,9 +113,35 @@ func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) 
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return endTs(sessions[i]) > endTs(sessions[j])
 	})
-	// 批量填充最近一次用户消息（供 TUI 展示）
+	// 批量填充最近一次用户消息与 usage（供 TUI 展示）
 	fillLastUserPrompts(ctx, db, sessions)
-	return sessions, nil
+	usages := fillUsages(ctx, db, sessions)
+	return sessions, usages, nil
+}
+
+// fillUsages 批量查询会话的 Token 汇总（含缓存字段）。
+func fillUsages(ctx context.Context, db *index.DB, sessions []*model.Session) map[string]timeline.SessionUsageRow {
+	if db == nil || len(sessions) == 0 {
+		return nil
+	}
+	keys := make([][2]string, 0, len(sessions))
+	seen := map[string]bool{}
+	for _, s := range sessions {
+		if s.SessionID == "" {
+			continue
+		}
+		key := s.AgentInstanceID + "\x00" + s.SessionID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, [2]string{s.AgentInstanceID, s.SessionID})
+	}
+	usages, err := timeline.UsageBySession(ctx, db, keys)
+	if err != nil {
+		return nil
+	}
+	return usages
 }
 
 // fillLastUserPrompts 批量查询会话的最后一次用户消息并写入 LastUserPrompt。
@@ -185,12 +213,12 @@ func Run(ctx context.Context, dir string) error {
 	if err := search.Populate(ctx, db); err != nil {
 		return err
 	}
-	sessions, err := loadTuiSessions(ctx, a, db, dir)
+	sessions, usages, err := loadTuiSessions(ctx, a, db, dir)
 	if err != nil {
 		return err
 	}
 
-	m := newMain(ctx, a, sessions, db, dir)
+	m := newMain(ctx, a, sessions, usages, db, dir)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	// TUI 已退出并恢复终端，此时再恢复会话，避免在 alt screen 内
@@ -244,6 +272,7 @@ type mainModel struct {
 	db       *index.DB
 	dir      string
 	sessions []*model.Session
+	usages   map[string]timeline.SessionUsageRow
 	list     list.Model
 	detail   *detailModel
 	keys     keyMap
@@ -276,6 +305,8 @@ type item struct {
 	title string
 	desc  string
 	sess  *model.Session
+	usage timeline.SessionUsageRow
+	hasUs bool
 }
 
 func (i item) Title() string       { return i.title }
@@ -285,8 +316,8 @@ func (i item) FilterValue() string {
 		i.sess.SessionID + " " + i.sess.WorkingDirectory
 }
 
-func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *index.DB, dir string) *mainModel {
-	items := itemsOf(sessions)
+func newMain(ctx context.Context, a *app.App, sessions []*model.Session, usages map[string]timeline.SessionUsageRow, db *index.DB, dir string) *mainModel {
+	items := itemsOf(sessions, usages)
 	l := list.New(items, newListDelegate(), 0, 0)
 	l.Title = "Talea · Agent Sessions"
 	l.SetShowStatusBar(true)
@@ -307,21 +338,29 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, db *ind
 		db:       db,
 		dir:      dir,
 		sessions: sessions,
+		usages:   usages,
 		list:     l,
 		keys:     km,
 		help:     help.New(),
 	}
 }
 
-// itemsOf 构造列表项。
-func itemsOf(sessions []*model.Session) []list.Item {
+// itemsOf 构造列表项。usages 为可选的会话 usage 映射（key=instance\x00session）。
+func itemsOf(sessions []*model.Session, usages map[string]timeline.SessionUsageRow) []list.Item {
 	items := make([]list.Item, 0, len(sessions))
 	for _, s := range sessions {
-		items = append(items, item{
-			title: sessionTitle(s),
-			desc:  sessionDesc(s),
-			sess:  s,
-		})
+		it := item{
+			sess: s,
+		}
+		if usages != nil {
+			if u, ok := usages[s.AgentInstanceID+"\x00"+s.SessionID]; ok {
+				it.usage = u
+				it.hasUs = true
+			}
+		}
+		it.title = itemTitle(it)
+		it.desc = itemDesc(it)
+		items = append(items, it)
 	}
 	return items
 }
@@ -336,83 +375,59 @@ func indexOf(items []list.Item, id string) int {
 	return -1
 }
 
-func sessionTitle(s *model.Session) string {
+// itemTitle 渲染列表第一行：agent + 时间 + 使用情况（Token / 缓存命中率）。
+func itemTitle(it item) string {
+	s := it.sess
 	agent := displayAgent(s.AgentID)
 	timeStr := ""
 	if s.StartedAt != nil {
 		timeStr = s.StartedAt.Format("01-02 15:04")
 	}
-	q := firstLine(s.FirstQuestion)
-	if q == "" {
-		q = i18n.Tr("No valid user question detected", "未识别到有效用户提问")
-	}
-	// 固定 agent 列（10 宽左对齐，容纳 claudecode）与时间列（11 宽），保证各行对齐
-	return fmt.Sprintf("[%s] %s  %s", padDisplay(agent, 10), timeStr, q)
-}
-
-func sessionDesc(s *model.Session) string {
-	type seg struct {
-		key   string
-		value string
-		valW  int // 值占位宽度（不足补空格，0 不限制）
-	}
-	var segs []seg
-	if s.LastUserPrompt != "" {
-		// 最近一次用户消息（单行截断，突出显示最新对话）
-		segs = append(segs, seg{i18n.Tr("Last", "最近"), truncRunes(firstLine(s.LastUserPrompt), 48), 0})
-	}
-	if s.StartedAt != nil {
-		segs = append(segs, seg{i18n.Tr("Start", "开始"), s.StartedAt.Format("01-02 15:04"), 11})
-	}
-	if s.EndedAt != nil {
-		segs = append(segs, seg{i18n.Tr("End", "结束"), s.EndedAt.Format("01-02 15:04"), 11})
-	}
-	if s.Duration != nil {
-		segs = append(segs, seg{i18n.Tr("Dur", "时长"), humanDur(*s.Duration), 7})
-	}
-	if s.TokenUsage != nil && s.TokenUsage.TotalTokens != nil {
-		segs = append(segs, seg{i18n.Tr("Token", "Token"), humanNum(*s.TokenUsage.TotalTokens), 8})
-	}
-	if s.WorkingDirectory != "" {
-		segs = append(segs, seg{i18n.Tr("Path", "目录"), shortHome(s.WorkingDirectory), 0})
-	}
-	if s.GitBranch != "" {
-		segs = append(segs, seg{i18n.Tr("Branch", "分支"), s.GitBranch, 0})
-	}
-	if s.Activity == model.ActivityActive {
-		segs = append(segs, seg{i18n.Tr("Status", "状态"), i18n.Tr("Active", "进行中"), 0})
-	}
-	if len(segs) == 0 {
-		return s.SessionID
-	}
-	// key 固定宽（左对齐）使各段起点对齐；value 左对齐补足占位宽，
-	// key 与 value 之间固定 1 空格，间距紧凑
-	const keyW = 6
 	var sb strings.Builder
-	for i, g := range segs {
-		if i > 0 {
+	sb.WriteString("[")
+	sb.WriteString(padDisplay(agent, 10))
+	sb.WriteString("] ")
+	sb.WriteString(timeStr)
+	if it.hasUs {
+		sb.WriteString("  ")
+		sb.WriteString(i18n.Tr("Token", "Token"))
+		sb.WriteString(" ")
+		sb.WriteString(humanNum(valOr(it.usage.TotalTokens)))
+		if rate := timeline.CacheHitRate(it.usage); rate >= 0 {
 			sb.WriteString("  ")
-		}
-		sb.WriteString(padDisplay(g.key+" ", keyW))
-		if g.valW > 0 {
-			sb.WriteString(padRight(g.value, g.valW))
-		} else {
-			sb.WriteString(g.value)
+			sb.WriteString(i18n.Tr("Cache", "缓存"))
+			sb.WriteString(" ")
+			sb.WriteString(fmt.Sprintf("%.0f%%", rate*100))
 		}
 	}
 	return sb.String()
 }
 
-// padDisplay 左对齐填充到指定显示宽度。
-func padDisplay(s string, w int) string {
-	if runewidth.StringWidth(s) >= w {
-		return s
+// itemDesc 渲染列表第二、三行：首次提问与最近一次用户消息。
+func itemDesc(it item) string {
+	s := it.sess
+	first := firstLine(s.FirstQuestion)
+	if first == "" {
+		first = i18n.Tr("No valid user question detected", "未识别到有效用户提问")
 	}
-	return s + strings.Repeat(" ", w-runewidth.StringWidth(s))
+	lines := []string{
+		i18n.Tr("Q: ", "问：") + truncRunes(first, 100),
+	}
+	if s.LastUserPrompt != "" {
+		lines = append(lines, i18n.Tr("Last: ", "最近：")+truncRunes(firstLine(s.LastUserPrompt), 100))
+	}
+	return strings.Join(lines, "\n")
 }
 
-// padRight 左对齐填充到指定显示宽度（值不足时补尾随空格，value 起点对齐）。
-func padRight(s string, w int) string {
+func valOr(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+// padDisplay 左对齐填充到指定显示宽度。
+func padDisplay(s string, w int) string {
 	if runewidth.StringWidth(s) >= w {
 		return s
 	}
@@ -470,7 +485,7 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			return m, nil
 		}
-		sessions, err := loadTuiSessions(m.ctx, m.app, m.db, m.dir)
+		sessions, usages, err := loadTuiSessions(m.ctx, m.app, m.db, m.dir)
 		if err != nil {
 			return m, nil
 		}
@@ -479,9 +494,10 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			sel = it.sess.SessionID
 		}
 		m.sessions = sessions
-		m.list.SetItems(itemsOf(sessions))
+		m.usages = usages
+		m.list.SetItems(itemsOf(sessions, usages))
 		if sel != "" {
-			if idx := indexOf(itemsOf(sessions), sel); idx >= 0 {
+			if idx := indexOf(itemsOf(sessions, usages), sel); idx >= 0 {
 				m.list.Select(idx)
 			}
 		}
