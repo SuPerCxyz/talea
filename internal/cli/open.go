@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
 	"github.com/talea/talea/internal/adapters"
@@ -18,63 +17,13 @@ import (
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/resume"
 	"github.com/talea/talea/internal/search"
+	"github.com/talea/talea/internal/syncer"
 )
-
-func newLastCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "last",
-		Short: i18n.Tr("recent session in current directory", "当前目录最近会话"),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			cwd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			a, err := app.New(ctx)
-			if err != nil {
-				return err
-			}
-			db, err := index.Open(a.Paths.DBPath)
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-			if err := db.Migrate(ctx); err != nil {
-				return err
-			}
-			if err := search.Ensure(ctx, db); err != nil {
-				return err
-			}
-			results, err := search.Search(ctx, db, search.Query{Cwd: cwd, Limit: 1})
-			if err != nil {
-				return err
-			}
-			if len(results) == 0 {
-				fmt.Println(i18n.Tr("no indexed sessions in current directory", "当前目录没有索引的会话"))
-				return nil
-			}
-			sess := &results[0].Session
-			sess.WorkingDirExists = dirExists(sess.WorkingDirectory)
-			sess.Activity = model.ActivityInactive
-			fmt.Printf("%s %s\n", i18n.Tr("Agent:", "Agent："), sess.AgentID)
-			fmt.Printf("%s %s\n", i18n.Tr("Session ID:", "会话 ID："), sess.SessionID)
-			fmt.Printf("%s %s\n", i18n.Tr("First question:", "首次提问："), firstLine(sess.FirstQuestion))
-			if sess.StartedAt != nil {
-				fmt.Printf("%s %s\n", i18n.Tr("Started:", "开始："), sess.StartedAt.Format("2006-01-02 15:04"))
-			}
-			if sess.WorkingDirectory != "" {
-				fmt.Printf("%s %s\n", i18n.Tr("Directory:", "目录："), sess.WorkingDirectory)
-			}
-			return nil
-		},
-	}
-	return cmd
-}
 
 // resumeSession 执行会话恢复：构造命令、处理目录缺失、执行或打印。
 // dryRun 为 true 时仅打印命令不执行；返回错误以退出码区分。
-func resumeSession(ctx context.Context, a *app.App, sess *model.Session, cwdFlag string, dryRun bool) error {
-	plan, err := resume.Build(*sess, cwdFlag, a.Config.PathMapping)
+func resumeSession(ctx context.Context, a *app.App, sess *model.Session, targetDir string, dryRun bool) error {
+	plan, err := resume.Build(*sess, targetDir, a.Config.PathMapping)
 	if err != nil {
 		return err
 	}
@@ -178,7 +127,7 @@ func findSession(ctx context.Context, a *app.App, id, agent string) (*model.Sess
 	if err := db.Migrate(ctx); err != nil {
 		return nil, err
 	}
-	if err := autoIndex(ctx, a, db); err != nil {
+	if err := syncer.Sync(ctx, a, db); err != nil {
 		return nil, err
 	}
 	results, err := search.ByIDPrefix(ctx, db, id, agent, 100)
@@ -233,16 +182,4 @@ func firstLine(s string) string {
 func dirExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
-}
-
-// autoIndex 在读取前执行一次增量索引并同步 FTS，保证新会话立即可见。
-// db 已由调用方打开并 Migrate。
-func autoIndex(ctx context.Context, a *app.App, db *index.DB) error {
-	if _, err := (&index.Indexer{App: a, DB: db}).Run(ctx); err != nil {
-		return err
-	}
-	if err := search.Ensure(ctx, db); err != nil {
-		return err
-	}
-	return search.Populate(ctx, db)
 }

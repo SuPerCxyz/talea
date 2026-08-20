@@ -59,5 +59,5 @@ talea index --metadata-only
 
 ## 导出提示
 
-`talea timeline --output file.csv` 等导出操作会包含会话内容，导出前应确认
+`talea export` 等导出操作会包含会话内容，导出前应确认
 文件中不包含需保密的密钥或客户信息。

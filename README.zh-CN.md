@@ -29,14 +29,14 @@ Talea 统一索引本机所有 AI Coding Agent 的会话历史，让你无需记
 - 🔎 **跨 Agent 全文搜索** — SQLite FTS5，支持中文（trigram）。
 - ▶️ **一条命令恢复** — 完整或前缀会话 ID 自动匹配；通过原生
   `claude --resume` / `codex resume` / `opencode -s` 在 Agent 自己的 TUI 中恢复。
-- 📊 **Token 时间线与成本分析** — 请求级时间线、模型汇总、上下文窗口曲线与压缩
-  检测、终端图表、费用估算。
+- 📊 **Token 分析** — 请求级 Token 数据、模型汇总、上下文窗口曲线、终端图表
+  （TUI 详情页展示）。
 - 🖥️ **交互式 TUI** — 会话列表 + 聚合详情页（上下文曲线、Token 图表、`t` 键展开
   用户轮次）。
 - 🌐 **界面语言** — 默认英文；终端 locale 以 `zh` 开头时自动切换中文。
 - 🔌 **可扩展** — 通过 `internal/adapters/<name>` 包或外部 `talea-adapter-<name>`
   可执行文件（JSON Lines over stdio，任意语言）扩展新 Agent。
-- 🔒 **隐私安全** — Agent 数据只读、索引文件权限 0600、预览脱敏、无遥测、不联网。
+- 🔒 **隐私安全** — Agent 数据只读、索引文件权限 0600、无遥测、不联网。
 - 🚀 **高性能** — 增量索引 + 断点续读；1 万会话二次索引约 0.8s。
 
 ## 支持的 Agent
@@ -96,9 +96,6 @@ talea index
 # 打开 TUI
 talea
 
-# 跨 Agent 搜索
-talea search "multipath"
-
 # 列出最近会话
 talea list
 
@@ -106,15 +103,17 @@ talea list
 talea go <session-id> --dry-run
 talea go <session-id>
 
-# 交互式选择会话，限定在指定目录子树内
-talea go --dir /home/user/myproject
+# 交互式选择会话，限定在指定目录内
+talea go --path /home/user/myproject
 ```
 
 ## TUI 界面
 
 ```text
 talea          # 会话列表，最新结束在前（最近 500 条）
-talea --dir /path   # 仅列出 /path 目录下的会话
+talea --path /path            # 仅列出 /path 目录下的会话（精确匹配，不含子目录）
+talea --agent opencode        # 仅列出指定 Agent 的会话
+talea --path /p --agent codex # 两个过滤可组合
 ```
 
 - 会话固定按结束时间倒序排列（最新在前），不受配置 `default_sort` 影响。
@@ -129,49 +128,16 @@ talea --dir /path   # 仅列出 /path 目录下的会话
 
 | 命令 | 说明 |
 |------|------|
-| `talea` | 打开 TUI（`--dir` 限定为指定目录下的会话） |
-| `talea list` | 列出会话（`--agent/--cwd/--project/--branch/--today/--active/--sort/--limit/--format`） |
-| `talea search <关键词>` | 跨 Agent 全文搜索（`--agent/--cwd/--since/--format`） |
-| `talea go [session-id]` | 按完整/前缀 ID 恢复，或交互式选择（`--cwd/--dir/--dry-run`） |
-| `talea last` | 当前目录最近会话 |
+| `talea` | 打开 TUI（`--path` 精确匹配指定目录；`--agent` 按 Agent 过滤；支持 `./`、`../` 等并可组合） |
+| `talea list` | 列出会话（`--agent/--path/--project/--branch/--today/--active/--sort/--limit/--format`） |
+| `talea go [session-id]` | 按完整/前缀 ID 恢复，或交互式选择（`--path/--target/--dry-run`） |
 | `talea index` | 增量索引（`--rebuild/--metadata-only`） |
-| `talea usage <id>` | Token 汇总（`--details/--include-subagents/--metrics`） |
-| `talea timeline <id>` | Token 时间线（`--group-by/--bucket/--around-peak/--by-model/--context/--insights/--chart`） |
-| `talea preview <id>` | 对话预览（`--limit/--system/--tail`） |
 | `talea doctor` | 环境诊断（`--json/--agent`） |
-| `talea run <agent>` | 包装启动 Agent 并记录真实进程时间 |
-| `talea watch` | 监听数据目录，变化时增量索引（`--interval`） |
 | `talea web` | 本地只读 Web 视图（仅 localhost，`--port`） |
-| `talea tag` | 标签 / 收藏 / 备注（`tag list|favorite|note`） |
 | `talea export` / `talea import` | 离线多设备迁移（JSON） |
 | `talea config` | `config path|init|validate` |
 
 输出格式：`--format table|json|jsonl|csv|markdown`。
-
-## Token 分析
-
-```sh
-# 请求级时间线（含日期）
-talea timeline <session-id>
-
-# 按用户轮次聚合
-talea timeline <session-id> --group-by turn
-
-# 5 分钟时间桶，峰值附近
-talea timeline <session-id> --bucket 5m --around-peak
-
-# 按模型汇总
-talea timeline <session-id> --by-model
-
-# 上下文窗口曲线 + 压缩检测
-talea timeline <session-id> --context
-
-# 本地规则洞察
-talea timeline <session-id> --insights
-
-# 费用估算（配置开启）
-talea usage <session-id>
-```
 
 精确值 / 估算值 / 未知值严格区分——缺失显示「未知」而非 0。时间线事件按
 `source_identity` 去重；子 Agent Token 独立保存，默认不合并到主会话。
@@ -188,15 +154,6 @@ talea usage <session-id>
 ```toml
 [general]
 default_sort = "last_activity"
-
-[usage]
-estimate_cost = false        # 启用费用估算
-
-[usage.pricing.custom-model]
-currency = "USD"
-input_per_million = 3.0
-output_per_million = 15.0
-cache_read_per_million = 0.3
 
 [path_mapping]               # 目录迁移/重命名映射
 "/old/project" = "/new/project"
@@ -227,7 +184,7 @@ cache_read_per_million = 0.3
 
 **需要 Python/Node/浏览器吗？** 不需要——单个 Go 二进制，零外部运行时依赖。
 
-**目录被移动/重命名后能恢复吗？** 可以。`talea go <id> --cwd <dir>` 或配置
+**目录被移动/重命名后能恢复吗？** 可以。`talea go <id> --target <dir>` 或配置
 `[path_mapping]`；原目录不存在时 `talea` 会提示输入新目录。
 
 ## 开发

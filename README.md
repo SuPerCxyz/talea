@@ -6,7 +6,7 @@
 
 **Trace the session. Resume the work.**
 
-Local-first session index, token timeline analyzer and resume launcher for AI coding agents.
+Local-first session index, token analysis and resume launcher for AI coding agents.
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
@@ -31,15 +31,15 @@ agents' data — it reads them **read-only** and keeps everything **local**.
 - ▶️ **One-command resume** — a full or partial session ID is matched automatically;
   resumes in the agent's own TUI via the native `claude --resume`, `codex resume` or
   `opencode -s` command.
-- 📊 **Token timeline & cost analysis** — per-request timeline, model summary, context
-  window curve with compaction detection, terminal charts, cost estimates.
+- 📊 **Token analysis** — per-request token data, model summary, context window curve,
+  terminal charts (visible in the TUI detail page).
 - 🖥️ **Interactive TUI** — session list with an aggregated detail page, context curve,
   token charts and a `t` key to expand user turns.
 - 🌐 **i18n** — English by default, Chinese automatically when your locale starts with `zh`.
 - 🔌 **Extensible** — add agents via `internal/adapters/<name>` packages or ship an
   external `talea-adapter-<name>` executable (JSON Lines over stdio, any language).
 - 🔒 **Private & safe** — agents' data opened read-only, index file permission `0600`,
-  secrets redacted in previews, no telemetry, no network access.
+  no telemetry, no network access.
 - 🚀 **Fast** — incremental indexing with offset-resume; 10k sessions re-index in ~0.8s.
 
 ## Supported Agents
@@ -100,9 +100,6 @@ talea index
 # Open the TUI
 talea
 
-# Search across agents
-talea search "multipath"
-
 # List recent sessions
 talea list
 
@@ -110,15 +107,17 @@ talea list
 talea go <session-id> --dry-run
 talea go <session-id>
 
-# Interactively pick a session, restricted to a directory subtree
-talea go --dir /home/user/myproject
+# Interactively pick a session, restricted to a directory (exact, no subdirs)
+talea go --path /home/user/myproject
 ```
 
 ## TUI
 
 ```text
 talea          # session list, newest end time first (most recent 500)
-talea --dir /path   # restrict the list to sessions under /path
+talea --path /path            # restrict the list to sessions in /path (exact dir, no subdirs)
+talea --agent opencode        # restrict the list to sessions from one agent
+talea --path /p --agent codex # combine both filters
 ```
 
 - Sessions are always sorted by end time (newest first), independent of
@@ -135,49 +134,16 @@ talea --dir /path   # restrict the list to sessions under /path
 
 | Command | Description |
 |---------|-------------|
-| `talea` | Open the TUI (`--dir` restricts the list to a directory subtree) |
-| `talea list` | List sessions (`--agent/--cwd/--project/--branch/--today/--active/--sort/--limit/--format`) |
-| `talea search <keyword>` | Full-text search across agents (`--agent/--cwd/--since/--format`) |
-| `talea go [session-id]` | Resume a session by full/prefix ID, or pick interactively (`--cwd/--dir/--dry-run`) |
-| `talea last` | Recent session in the current directory |
+| `talea` | Open the TUI (`--path` restricts to an exact directory, no subdirs; `--agent` filters by agent; both accept `./`, `../` etc. and can be combined) |
+| `talea list` | List sessions (`--agent/--path/--project/--branch/--today/--active/--sort/--limit/--format`) |
+| `talea go [session-id]` | Resume a session by full/prefix ID, or pick interactively (`--path/--target/--dry-run`) |
 | `talea index` | Incremental index (`--rebuild/--metadata-only`) |
-| `talea usage <id>` | Token usage summary (`--details/--include-subagents/--metrics`) |
-| `talea timeline <id>` | Token timeline (`--group-by/--bucket/--around-peak/--by-model/--context/--insights/--chart`) |
-| `talea preview <id>` | Conversation preview (`--limit/--system/--tail`) |
 | `talea doctor` | Environment diagnostics (`--json/--agent`) |
-| `talea run <agent>` | Wrap-launch an agent and record real process times |
-| `talea watch` | Watch agent data dirs and index on change (`--interval`) |
 | `talea web` | Local read-only web view on localhost (`--port`) |
-| `talea tag` | Tags / favorite / note (`tag list|favorite|note`) |
 | `talea export` / `talea import` | Offline multi-device transfer (JSON) |
 | `talea config` | `config path|init|validate` |
 
 Output formats: `--format table|json|jsonl|csv|markdown`.
-
-## Token Analysis
-
-```sh
-# Request-level timeline (dates included)
-talea timeline <session-id>
-
-# Aggregate by user turn
-talea timeline <session-id> --group-by turn
-
-# 5-minute buckets, around peak
-talea timeline <session-id> --bucket 5m --around-peak
-
-# Model summary
-talea timeline <session-id> --by-model
-
-# Context window curve + compaction detection
-talea timeline <session-id> --context
-
-# Local-rule insights
-talea timeline <session-id> --insights
-
-# Cost estimate (opt-in via config)
-talea usage <session-id>
-```
 
 Exact / estimated / unknown token values are kept strictly distinct — missing data shows
 `unknown`, never `0`. Timeline events are deduplicated by `source_identity`; sub-agent
@@ -196,15 +162,6 @@ messages.
 ```toml
 [general]
 default_sort = "last_activity"
-
-[usage]
-estimate_cost = false        # enable cost estimation
-
-[usage.pricing.custom-model]
-currency = "USD"
-input_per_million = 3.0
-output_per_million = 15.0
-cache_read_per_million = 0.3
 
 [path_mapping]               # remap moved/renamed directories
 "/old/project" = "/new/project"
@@ -239,7 +196,7 @@ more.
 
 **Do I need Python/Node/a browser?** No — a single Go binary, zero external runtime deps.
 
-**Can it resume sessions from a moved directory?** Yes. Use `talea go <id> --cwd <dir>`
+**Can it resume sessions from a moved directory?** Yes. Use `talea go <id> --target <dir>`
 or configure `[path_mapping]`; `talea` prompts for a new directory when the original is gone.
 
 ## Development

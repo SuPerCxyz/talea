@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -66,7 +68,7 @@ func TestLoadTuiSessionsDirFilter(t *testing.T) {
 	reg := adapters.NewRegistry()
 	a := &app.App{Registry: reg, Config: cfg}
 
-	all, _, err := loadTuiSessions(ctx, a, db, "")
+	all, _, err := loadTuiSessions(ctx, a, db, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,20 +76,71 @@ func TestLoadTuiSessionsDirFilter(t *testing.T) {
 		t.Fatalf("no dir filter: got %d sessions, want 3", len(all))
 	}
 
-	filtered, _, err := loadTuiSessions(ctx, a, db, "/home/user/nexora")
+	filtered, _, err := loadTuiSessions(ctx, a, db, "/home/user/nexora", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(filtered) != 2 {
-		t.Fatalf("dir filter: got %d sessions, want 2", len(filtered))
+	if len(filtered) != 1 || filtered[0].SessionID != "ses_1" {
+		t.Fatalf("dir filter: got %d sessions, want ses_1 only", len(filtered))
 	}
 
-	sub, _, err := loadTuiSessions(ctx, a, db, "/home/user/nexora/frontend")
+	sub, _, err := loadTuiSessions(ctx, a, db, "/home/user/nexora/frontend", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sub) != 1 || sub[0].SessionID != "ses_2" {
 		t.Fatalf("sub dir filter: got %d sessions, want ses_2 only", len(sub))
+	}
+}
+
+// TestLoadTuiSessionsAgentFilter 验证 TUI 按 Agent 过滤，且可与目录过滤组合。
+func TestLoadTuiSessionsAgentFilter(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := search.Ensure(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	sessions := []*model.Session{
+		mkTuiSession("ses_1", "/home/user/nexora"),                       // opencode
+		mkTuiSession("ses_2", "/home/user/nexora/frontend"),              // opencode
+		{AgentID: model.AgentClaudeCode, SessionID: "ses_3", FirstQuestion: "cc", WorkingDirectory: "/home/user/nexora", StartedAt: &now, EndedAt: &now, LastActivityAt: &now, Activity: model.ActivityInactive, IndexedAt: now, UpdatedAt: now},
+	}
+	for _, s := range sessions {
+		if err := db.UpsertSession(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := search.Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg}
+
+	// 仅按 Agent 过滤
+	oc, _, err := loadTuiSessions(ctx, a, db, "", "opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(oc) != 2 {
+		t.Fatalf("agent filter: got %d sessions, want 2", len(oc))
+	}
+
+	// Agent + 目录组合过滤
+	combo, _, err := loadTuiSessions(ctx, a, db, "/home/user/nexora", "opencode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(combo) != 1 || combo[0].SessionID != "ses_1" {
+		t.Fatalf("agent+dir filter: got %d sessions, want ses_1 only", len(combo))
 	}
 }
 
@@ -216,7 +269,7 @@ func TestMainModelInit(t *testing.T) {
 	cfg := config.Default()
 	reg := adapters.NewRegistry()
 	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
-	m := newMain(ctx, a, nil, nil, nil, "")
+	m := newMain(ctx, a, nil, nil, nil, "", "")
 	if m == nil {
 		t.Fatal("nil model")
 	}
@@ -242,7 +295,7 @@ func TestFilterModeIgnoresFunctionKeys(t *testing.T) {
 	reg := adapters.NewRegistry()
 	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
 	s := mkTuiSession("ses_1", "/home/user/nexora")
-	m := newMain(ctx, a, []*model.Session{s}, nil, nil, "")
+	m := newMain(ctx, a, []*model.Session{s}, nil, nil, "", "")
 
 	// 进入过滤模式：list 收到 "/" 后状态变为 Filtering
 	nm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
@@ -364,7 +417,7 @@ func TestLoadTuiSessionsTimeSort(t *testing.T) {
 	reg := adapters.NewRegistry()
 	a := &app.App{Registry: reg, Config: cfg}
 
-	sessions, _, err := loadTuiSessions(ctx, a, db, "")
+	sessions, _, err := loadTuiSessions(ctx, a, db, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,3 +451,189 @@ var _ list.Item = item{}
 var _ tea.Model = (*mainModel)(nil)
 
 func timePtr(t time.Time) *time.Time { return &t }
+
+// TestPaginationDotsApplied 回归：分页圆点样式必须真正应用到 Paginator，
+// 否则 bubbles list.New 的默认深灰圆点（#3C3C3C）在深色终端上几乎不可见。
+func TestPaginationDotsApplied(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
+	m := newMain(ctx, a, []*model.Session{mkTuiSession("ses_1", "/home/user/nexora")}, nil, nil, "", "")
+
+	if !strings.Contains(m.list.Paginator.ActiveDot, "•") {
+		t.Errorf("active dot should use the dot char, got %q", m.list.Paginator.ActiveDot)
+	}
+	if !strings.Contains(m.list.Paginator.InactiveDot, "•") {
+		t.Errorf("inactive dot should use the dot char, got %q", m.list.Paginator.InactiveDot)
+	}
+	// 无 TTY 测试环境下 lipgloss 不输出 ANSI 序列，这里断言样式配置本身：
+	// 当前页圆点须加粗突出，且与非当前页颜色不同。
+	if !m.list.Styles.ActivePaginationDot.GetBold() {
+		t.Error("active dot should be bold to stand out")
+	}
+	if m.list.Styles.ActivePaginationDot.GetForeground() == m.list.Styles.InactivePaginationDot.GetForeground() {
+		t.Error("active and inactive dots must use different colors")
+	}
+}
+
+// TestPaginationDotsRender 验证：设置尺寸后，真实 View 渲染输出中包含
+// 自定义实心分页圆点 ●（而非默认不可见深灰圆点）。
+func TestPaginationDotsRender(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
+	var sessions []*model.Session
+	for i := 0; i < 30; i++ {
+		sessions = append(sessions, mkTuiSession(fmt.Sprintf("ses_%02d", i), "/home/user/nexora"))
+	}
+	m := newMain(ctx, a, sessions, nil, nil, "", "")
+	m.list.SetSize(80, 30)
+	out := m.list.View()
+	if !strings.Contains(out, "•") {
+		t.Errorf("pagination should render dots, got: %q", out)
+	}
+}
+
+// TestLoadingViewRendersSpinner 验证首屏等待动画：loading 状态下 View
+// 渲染 spinner 帧与同步文案（中/英文均可）。
+func TestLoadingViewRendersSpinner(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
+	m := newMain(ctx, a, nil, nil, nil, "", "")
+	m.loading = true
+	out := m.View()
+	if out == "" {
+		t.Fatal("empty loading view")
+	}
+	if !strings.Contains(out, "⣾") {
+		t.Errorf("loading view should include a spinner frame, got: %q", out)
+	}
+	if !strings.Contains(out, "正在同步会话") && !strings.Contains(out, "Syncing sessions") {
+		t.Errorf("loading view should show sync message, got: %q", out)
+	}
+}
+
+// TestLoadingIgnoresKeys 验证首屏加载中仅允许退出：
+// o/enter/d 不得触发恢复或详情，q/ctrl+c 触发退出。
+func TestLoadingIgnoresKeys(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
+	m := newMain(ctx, a, nil, nil, nil, "", "")
+	m.loading = true
+
+	// o：不得恢复
+	nm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	mm := nm.(*mainModel)
+	if mm.picked != nil || cmd != nil {
+		t.Fatalf("loading: 'o' should be ignored, picked=%v cmd=%v", mm.picked, cmd)
+	}
+	// d：不得打开详情
+	nm, cmd = mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	mm = nm.(*mainModel)
+	if mm.detail != nil || cmd != nil {
+		t.Fatalf("loading: 'd' should be ignored, detail=%v", mm.detail)
+	}
+	// enter：不得恢复
+	nm, cmd = mm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	mm = nm.(*mainModel)
+	if mm.picked != nil || cmd != nil {
+		t.Fatalf("loading: enter should be ignored, picked=%v", mm.picked)
+	}
+	// q：退出
+	_, cmd = mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if cmd == nil {
+		t.Fatal("loading: 'q' should quit")
+	}
+}
+
+// TestIndexedMsgLoadsList 验证首屏同步完成后：loading 解除并填充最新列表。
+func TestIndexedMsgLoadsList(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := search.Ensure(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpsertSession(ctx, mkTuiSession("ses_new", "/home/user/nexora")); err != nil {
+		t.Fatal(err)
+	}
+	if err := search.Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg}
+	m := newMain(ctx, a, nil, nil, db, "", "")
+	m.loading = true
+
+	nm, _ := m.Update(indexedMsg{})
+	mm := nm.(*mainModel)
+	if mm.loading {
+		t.Fatal("loading should be cleared after indexedMsg")
+	}
+	if mm.loadingErr != nil {
+		t.Fatalf("unexpected loadingErr: %v", mm.loadingErr)
+	}
+	if len(mm.sessions) != 1 || mm.sessions[0].SessionID != "ses_new" {
+		t.Fatalf("list should be filled with new session, got %d sessions", len(mm.sessions))
+	}
+}
+
+// TestIndexedMsgErrorShowsFeedback 验证首屏同步失败时解除 loading 并记录错误。
+func TestIndexedMsgErrorShowsFeedback(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg}
+	m := newMain(ctx, a, nil, nil, nil, "", "")
+	m.loading = true
+	m.indexErr = errors.New("boom")
+
+	nm, _ := m.Update(indexedMsg{})
+	mm := nm.(*mainModel)
+	if mm.loading {
+		t.Fatal("loading should be cleared on error")
+	}
+	if mm.loadingErr == nil {
+		t.Fatal("loadingErr should be set on sync failure")
+	}
+	out := mm.View()
+	if !strings.Contains(out, "同步会话失败") && !strings.Contains(out, "Failed to sync sessions") {
+		t.Errorf("error view should show failure message, got: %q", out)
+	}
+}
+
+
+// TestLoadingViewCentered 验证 loading 视图在设置尺寸后水平且垂直居中。
+func TestLoadingViewCentered(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
+	m := newMain(ctx, a, nil, nil, nil, "", "")
+	m.loading = true
+	m.width = 100
+	m.height = 30
+	out := m.View()
+	// 输出高度应为 30 行（垂直居中填满）
+	if got := strings.Count(out, "\n") + 1; got != 30 {
+		t.Errorf("loading view should fill 30 lines (vertical center), got %d lines", got)
+	}
+	// 首行（标题）前应有前导空格（水平居中），且尾部同样有空格填充
+	first := out[:strings.Index(out, "\n")]
+	if !strings.HasPrefix(first, " ") {
+		t.Errorf("loading view should be horizontally centered, first line starts without padding: %q", first)
+	}
+}

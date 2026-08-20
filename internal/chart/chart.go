@@ -26,8 +26,8 @@ func bar(values []float64, labels []string, height, maxCols int) string {
 	if len(values) == 0 {
 		return ""
 	}
-	// 抽样到 maxCols 列（每列 2 字符：█+空格）
-	if maxCols > 0 && len(values) > maxCols {
+	// 抽样或拉伸到 maxCols 列（点少时拉伸占满宽度，点多时降采样）
+	if maxCols > 0 && len(values) != maxCols {
 		step := float64(len(values)) / float64(maxCols)
 		sampled := make([]float64, 0, maxCols)
 		sampledLabels := make([]string, 0, maxCols)
@@ -52,7 +52,7 @@ func bar(values []float64, labels []string, height, maxCols int) string {
 	if maxV <= 0 {
 		maxV = 1
 	}
-	yWidth := axisWidth(maxV)
+	yWidth := AxisWidth(maxV)
 
 	var sb strings.Builder
 	// 顶部到低的柱（r=0 顶，r=height-1 底）
@@ -75,31 +75,47 @@ func bar(values []float64, labels []string, height, maxCols int) string {
 		}
 		sb.WriteString("\n")
 	}
-	// 数值刻度（柱多时降采样）
+	// 数值刻度（柱多时降采样，精确对齐到柱列位置）
 	step := 1
 	for len(values)/step > 12 {
 		step++
 	}
-	sb.WriteString(strings.Repeat(" ", yWidth))
+	var tick strings.Builder
+	tick.WriteString(strings.Repeat(" ", yWidth))
+	x := yWidth
 	for i, v := range values {
 		if i%step != 0 {
-			sb.WriteString("  ")
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("%s ", compact(v)))
+		target := yWidth + i*2
+		if target > x {
+			tick.WriteString(strings.Repeat(" ", target-x))
+			x = target
+		}
+		label := compact(v)
+		tick.WriteString(label)
+		x += runewidth.StringWidth(label)
 	}
-	sb.WriteString("\n")
-	// 标签（柱多时降采样，保留完整 HH:MM）
+	sb.WriteString(tick.String() + "\n")
+	// 标签（柱多时降采样，保留完整 HH:MM，精确对齐）
 	if len(labels) > 0 {
-		sb.WriteString(strings.Repeat(" ", yWidth))
+		var tl strings.Builder
+		tl.WriteString(strings.Repeat(" ", yWidth))
+		x = yWidth
 		for i, l := range labels {
 			if i%step != 0 {
-				sb.WriteString("   ")
 				continue
 			}
-			sb.WriteString(trunc(l, 5) + " ")
+			target := yWidth + i*2
+			if target > x {
+				tl.WriteString(strings.Repeat(" ", target-x))
+				x = target
+			}
+			label := trunc(l, 5)
+			tl.WriteString(label)
+			x += runewidth.StringWidth(label)
 		}
-		sb.WriteString("\n")
+		sb.WriteString(tl.String() + "\n")
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
@@ -117,8 +133,8 @@ func Area(values []float64, labels []string, height, yWidth, plotWidth int) stri
 	if len(values) == 0 {
 		return ""
 	}
-	// 抽样到 plotWidth 列
-	if len(values) > plotWidth {
+	// 抽样或拉伸到 plotWidth 列（点少时拉伸占满宽度，点多时降采样）
+	if len(values) != plotWidth {
 		step := float64(len(values)) / float64(plotWidth)
 		sampled := make([]float64, 0, plotWidth)
 		sampledLabels := make([]string, 0, plotWidth)
@@ -146,7 +162,7 @@ func Area(values []float64, labels []string, height, yWidth, plotWidth int) stri
 		maxV = 1
 	}
 	if yWidth <= 0 {
-		yWidth = axisWidth(maxV)
+		yWidth = AxisWidth(maxV)
 	}
 
 	var sb strings.Builder
@@ -172,13 +188,15 @@ func Area(values []float64, labels []string, height, yWidth, plotWidth int) stri
 	if step < 1 {
 		step = 1
 	}
+	hasLabels := len(labels) == len(values)
+	sb.WriteString(strings.Repeat(" ", yWidth))
 	for i := 0; i < len(values); i += step {
 		w := step
 		if i+w > len(values) {
 			w = len(values) - i
 		}
-		// 剩余宽度不足 3 列时不渲染残缺标签
-		if w < 3 {
+		// 无标签或剩余宽度不足 3 列时不渲染残缺标签
+		if !hasLabels || w < 3 {
 			sb.WriteString(strings.Repeat(" ", w))
 			continue
 		}
@@ -186,7 +204,7 @@ func Area(values []float64, labels []string, height, yWidth, plotWidth int) stri
 		if lw < 1 {
 			lw = 1
 		}
-		label := cut(labels[i/step], lw)
+		label := cut(labels[i], lw)
 		sb.WriteString(label)
 		if pad := w - runewidth.StringWidth(label); pad > 0 {
 			sb.WriteString(strings.Repeat(" ", pad))
@@ -212,8 +230,8 @@ func cut(s string, n int) string {
 	return string(out)
 }
 
-// axisWidth 计算 y 轴刻度宽度（含 1 空格分隔）。
-func axisWidth(maxV float64) int {
+// AxisWidth 计算 y 轴刻度宽度（含 1 空格分隔）。
+func AxisWidth(maxV float64) int {
 	w := runewidth.StringWidth(compact(maxV))
 	if w < 3 {
 		w = 3

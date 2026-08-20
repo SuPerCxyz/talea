@@ -47,34 +47,30 @@ func Execute() int {
 
 // NewRootCmd 构建根命令。
 func NewRootCmd() *cobra.Command {
-	var dirFlag string
+	var (
+		pathFlag  string
+		agentFlag string
+	)
 	root := &cobra.Command{
 		Use:     "talea",
 		Short:   "Trace the session. Resume the work.",
-		Long:    i18n.Tr("Talea — a local-first AI coding agent session index, search, preview, token analysis and resume tool.", "Talea — 本地优先的 AI Coding Agent 会话索引、搜索、预览、Token 分析与恢复工具。"),
+		Long:    i18n.Tr("Talea — a local-first AI coding agent session index, search, token analysis and resume tool.", "Talea — 本地优先的 AI Coding Agent 会话索引、搜索、Token 分析与恢复工具。"),
 		Version: version.String(),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 无子命令时打开 TUI
-			return tui.Run(cmd.Context(), dirFlag)
+			return tui.Run(cmd.Context(), pathFlag, agentFlag)
 		},
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
-	root.Flags().StringVarP(&dirFlag, "dir", "d", "", i18n.Tr("filter sessions under this directory (TUI)", "仅列出该目录下的会话（TUI）"))
+	root.Flags().StringVarP(&pathFlag, "path", "p", "", i18n.Tr("filter sessions in this exact directory (TUI)", "仅列出该目录下的会话（精确匹配，不含子目录）"))
+	root.Flags().StringVarP(&agentFlag, "agent", "a", "", i18n.Tr("filter sessions by agent (TUI)", "按 Agent 过滤会话（TUI）"))
 	root.AddCommand(newListCmd())
-	root.AddCommand(newSearchCmd())
 	root.AddCommand(newGoCmd())
-	root.AddCommand(newLastCmd())
 	root.AddCommand(newIndexCmd())
-	root.AddCommand(newUsageCmd())
-	root.AddCommand(newTimelineCmd())
 	root.AddCommand(newDoctorCmd())
 	root.AddCommand(newConfigCmd())
-	root.AddCommand(newRunCmd())
-	root.AddCommand(newPreviewCmd())
-	root.AddCommand(newTagCmd())
 	root.AddCommand(newWebCmd())
-	root.AddCommand(newWatchCmd())
 	root.AddCommand(newExportCmd())
 	root.AddCommand(newImportCmd())
 	root.AddCommand(&cobra.Command{

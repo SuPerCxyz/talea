@@ -18,26 +18,25 @@
 
 ## 2. Talea 现有覆盖
 
-- 会话索引 / 搜索 / 预览 / 恢复（Claude Code / Codex CLI / OpenCode + 外部适配器协议）。
-- 单会话 Token 汇总、时间线、上下文曲线、压缩检测、费用估算。
+- 会话索引 / 搜索 / 恢复（Claude Code / Codex CLI / OpenCode + 外部适配器协议）。
+- TUI 详情页：会话信息、Token 汇总、上下文曲线、模型汇总、速率图表、子 Agent。
 - TUI（列表 + 聚合详情页）、Web 只读视图。
-- 标签 / 收藏 / 备注、export/import、watch、run、i18n 双语。
+- 标签 / 收藏 / 备注、export/import、i18n 双语。
 
 ## 3. 可补充功能清单
 
 ### P0 — 高价值低成本
 
 1. **`talea stats` 全局统计报表**
-   - 按 Agent / 项目 / 日期 / 周聚合 Token 与费用。
+   - 按 Agent / 项目 / 日期 / 周聚合 Token。
    - 数据已在库（`session_usage` + `usage_timeline_events`），SQL `GROUP BY` 即可。
-   - 复用 `internal/cost` 费用估算；含缓存命中率。
    - 输出 table/json/markdown。
    - 数据来源：`internal/usage`、`internal/timeline` 聚合函数。
 
 ### P1 — 中价值
 
 2. **工具使用统计**
-   - `talea stats --by tool` 或在 `talea timeline` 增加工具维度。
+   - `talea stats --by tool` 增加工具维度。
    - `usage_timeline_events.tool_name` 已有，SQL 聚合即可。
 
 3. **会话 fork**
@@ -49,16 +48,13 @@
 
 ### P2 — 可选
 
-5. **shell 状态行集成**
-   - `talea watch --status` 实时展示当前会话 Token 消耗（claude-meter/splitrail 风格）。
-
-6. **HTML 报告导出**
+5. **HTML 报告导出**
    - `talea stats --format html` 生成交互式报表（token-report 风格）。
 
-7. **MCP server**
+6. **MCP server**
    - 暴露 Talea search/stats 给其他 Agent 工具。
 
-8. **趋势 / 异常检测增强**
+7. **趋势 / 异常检测增强**
    - 在 `internal/insights` 基础上扩展"会话间重复错误 / 漂移"检测（drift-watch 风格，较重）。
 
 ## 4. 约束一致性

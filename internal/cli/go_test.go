@@ -64,22 +64,21 @@ func TestQueryGoSessionsDirFilter(t *testing.T) {
 		t.Fatalf("no dir filter: got %d sessions, want 3", len(all))
 	}
 
-	// 指定目录：只返回该目录前缀下的会话
+	// 指定目录：精确匹配，只返回该目录下的会话（不含子目录）
 	filtered, err := queryGoSessions(ctx, db, "/home/user/nexora")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(filtered) != 2 {
-		t.Fatalf("dir filter: got %d sessions, want 2", len(filtered))
+	if len(filtered) != 1 || filtered[0].SessionID != "ses_a" {
+		t.Fatalf("dir filter: got %d sessions (%v), want ses_a only", len(filtered), filtered)
 	}
 	for _, s := range filtered {
-		if len(s.WorkingDirectory) < len("/home/user/nexora") ||
-			s.WorkingDirectory[:len("/home/user/nexora")] != "/home/user/nexora" {
-			t.Errorf("session %s working dir %q outside filter", s.SessionID, s.WorkingDirectory)
+		if s.WorkingDirectory != "/home/user/nexora" {
+			t.Errorf("session %s working dir %q not exact match", s.SessionID, s.WorkingDirectory)
 		}
 	}
 
-	// 子目录过滤
+	// 子目录过滤：只命中子目录本身的会话
 	sub, err := queryGoSessions(ctx, db, "/home/user/nexora/frontend")
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +119,7 @@ func TestGoRow(t *testing.T) {
 				HasTokenUsage:    true,
 				TokenUsage:       &model.TokenUsage{TotalTokens: int64p(1400000)},
 			},
-			want: []string{"claudecode", "abc123", "08-05 16:41", "08-05 17:00", "19m 0s", "1.40M", "~/proj", "修复登录 bug"},
+			want: []string{"claude-code", "abc123", "08-05 16:41", "08-05 17:00", "19m 0s", "1.40M", "~/proj", "修复登录 bug"},
 		},
 		{
 			name: "empty optional",

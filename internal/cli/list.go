@@ -15,12 +15,13 @@ import (
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/search"
+	"github.com/talea/talea/internal/syncer"
 )
 
 func newListCmd() *cobra.Command {
 	var (
 		agentFlag        string
-		cwdFlag          string
+		pathFlag         string
 		projectFlag      string
 		branchFlag       string
 		todayFlag        bool
@@ -47,13 +48,13 @@ func newListCmd() *cobra.Command {
 			if err := db.Migrate(ctx); err != nil {
 				return err
 			}
-			if err := autoIndex(ctx, a, db); err != nil {
+			if err := syncer.Sync(ctx, a, db); err != nil {
 				return err
 			}
 
 			q := search.Query{
 				Agent:   agentFlag,
-				Cwd:     cwdFlag,
+				Cwd:     pathFlag,
 				Project: projectFlag,
 				Branch:  branchFlag,
 				Limit:   limitFlag,
@@ -69,19 +70,19 @@ func newListCmd() *cobra.Command {
 			for i := range results {
 				sessions = append(sessions, &results[i].Session)
 			}
-		effectiveSort := sortFlag
-		if effectiveSort == "" {
-			effectiveSort = a.Config.General.DefaultSort
-		}
-		if effectiveSort == "" || effectiveSort == "last_activity" {
-			// 默认按会话结束时间降序（与 talea go 一致）
-			sort.SliceStable(sessions, func(i, j int) bool {
-				return endTs(sessions[i]) > endTs(sessions[j])
-			})
-		} else {
-			a.Config.General.DefaultSort = effectiveSort
-			a.SortSessions(sessions)
-		}
+			effectiveSort := sortFlag
+			if effectiveSort == "" {
+				effectiveSort = a.Config.General.DefaultSort
+			}
+			if effectiveSort == "" || effectiveSort == "last_activity" {
+				// 默认按会话结束时间降序（与 talea go 一致）
+				sort.SliceStable(sessions, func(i, j int) bool {
+					return endTs(sessions[i]) > endTs(sessions[j])
+				})
+			} else {
+				a.Config.General.DefaultSort = effectiveSort
+				a.SortSessions(sessions)
+			}
 			if !includeSubagents {
 				filtered := sessions[:0]
 				for _, s := range sessions {
@@ -107,7 +108,7 @@ func newListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("filter by agent", "按 Agent 过滤"))
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("filter by working directory prefix", "按工作目录前缀过滤"))
+	cmd.Flags().StringVar(&pathFlag, "path", "", i18n.Tr("filter by working directory", "按工作目录过滤"))
 	cmd.Flags().StringVar(&projectFlag, "project", "", i18n.Tr("filter by project name", "按项目名称过滤"))
 	cmd.Flags().StringVar(&branchFlag, "branch", "", i18n.Tr("filter by git branch", "按 Git 分支过滤"))
 	cmd.Flags().BoolVar(&todayFlag, "today", false, i18n.Tr("today only", "仅今天"))
@@ -115,71 +116,6 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&includeSubagents, "include-subagents", false, i18n.Tr("include sub-agent sessions", "包含子 Agent 会话"))
 	cmd.Flags().StringVar(&sortFlag, "sort", "", i18n.Tr("sort: last_activity/started_at/tokens/name", "排序：last_activity/started_at/tokens/name"))
 	cmd.Flags().IntVar(&limitFlag, "limit", 30, i18n.Tr("max items (default recent 30)", "最多条数（默认最近 30 个）"))
-	cmd.Flags().StringVar(&formatFlag, "format", "table", i18n.Tr("output format: table/json/jsonl/csv/markdown", "输出格式：table/json/jsonl/csv/markdown"))
-	return cmd
-}
-
-func newSearchCmd() *cobra.Command {
-	var (
-		agentFlag   string
-		cwdFlag     string
-		projectFlag string
-		branchFlag  string
-		sinceFlag   int
-		limitFlag   int
-		formatFlag  string
-	)
-	cmd := &cobra.Command{
-		Use:   "search [keyword]",
-		Short: i18n.Tr("full-text search across agents", "跨 Agent 全文搜索"),
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			a, err := app.New(ctx)
-			if err != nil {
-				return err
-			}
-			db, err := index.Open(a.Paths.DBPath)
-			if err != nil {
-				return err
-			}
-			defer db.Close()
-			if err := db.Migrate(ctx); err != nil {
-				return err
-			}
-			if err := autoIndex(ctx, a, db); err != nil {
-				return err
-			}
-
-			q := search.Query{
-				Term:      args[0],
-				Agent:     agentFlag,
-				Cwd:       cwdFlag,
-				Project:   projectFlag,
-				Branch:    branchFlag,
-				SinceDays: sinceFlag,
-				Limit:     limitFlag,
-			}
-			results, err := search.Search(ctx, db, q)
-			if err != nil {
-				return err
-			}
-			var sessions []*model.Session
-			for i := range results {
-				sessions = append(sessions, &results[i].Session)
-			}
-			if len(sessions) == 0 {
-				return nil
-			}
-			return output.Write(os.Stdout, sessions, output.Format(formatFlag))
-		},
-	}
-	cmd.Flags().StringVar(&agentFlag, "agent", "", i18n.Tr("filter by agent", "按 Agent 过滤"))
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("filter by working directory prefix", "按工作目录前缀过滤"))
-	cmd.Flags().StringVar(&projectFlag, "project", "", i18n.Tr("filter by project name", "按项目名称过滤"))
-	cmd.Flags().StringVar(&branchFlag, "branch", "", i18n.Tr("filter by git branch", "按 Git 分支过滤"))
-	cmd.Flags().IntVar(&sinceFlag, "since", 0, i18n.Tr("recent N days", "最近 N 天"))
-	cmd.Flags().IntVar(&limitFlag, "limit", 0, i18n.Tr("max items", "最多条数"))
 	cmd.Flags().StringVar(&formatFlag, "format", "table", i18n.Tr("output format: table/json/jsonl/csv/markdown", "输出格式：table/json/jsonl/csv/markdown"))
 	return cmd
 }
@@ -331,12 +267,6 @@ data_dirs = []
 [search]
 max_results = 200
 preview_message_limit = 20
-
-[usage]
-enabled = true
-store_request_details = true
-estimate_cost = false
-include_subagents_by_default = false
 
 [privacy]
 redact_secrets_in_preview = true

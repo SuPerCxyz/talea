@@ -67,10 +67,3 @@ type UsageCompleteness string // complete / partial / missing / unknown
 
 轮次聚合（`timeline.GroupByTurns`）将一次用户消息到下一次用户消息之间
 的所有请求归入同一轮次。
-
-## 费用估算（P1，默认关闭）
-
-- 使用整数微货币单位（`EstimatedCostMicros`），不用 float64 存金额。
-- 价格表带版本与生效时间；价格变化不修改旧估算。
-- 无法确认模型版本时不估算。
-- 本地免费模型不显示费用。

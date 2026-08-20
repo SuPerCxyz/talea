@@ -36,12 +36,6 @@ func Default() *Config {
 			MaxResults:          200,
 			PreviewMessageLimit: 20,
 		},
-		Usage: Usage{
-			Enabled:                   true,
-			StoreRequestDetails:       true,
-			EstimateCost:              false,
-			IncludeSubagentsByDefault: false,
-		},
 		Privacy: Privacy{
 			RedactSecretsInPreview: true,
 			RedactSecretsInExport:  false,
@@ -55,7 +49,6 @@ type Config struct {
 	Index       Index                  `toml:"index"`
 	Agents      map[string]AgentConfig `toml:"agents"`
 	Search      Search                 `toml:"search"`
-	Usage       Usage                  `toml:"usage"`
 	Privacy     Privacy                `toml:"privacy"`
 	PathMapping map[string]string      `toml:"path_mapping"`
 }
@@ -84,26 +77,6 @@ type AgentConfig struct {
 type Search struct {
 	MaxResults          int `toml:"max_results"`
 	PreviewMessageLimit int `toml:"preview_message_limit"`
-}
-
-type Usage struct {
-	Enabled                   bool    `toml:"enabled"`
-	StoreRequestDetails       bool    `toml:"store_request_details"`
-	EstimateCost              bool    `toml:"estimate_cost"`
-	IncludeSubagentsByDefault bool    `toml:"include_subagents_by_default"`
-	Pricing                   Pricing `toml:"pricing"`
-}
-
-type Pricing struct {
-	CustomModel map[string]ModelPrice `toml:"custom-model"`
-}
-
-type ModelPrice struct {
-	Currency             string  `toml:"currency"`
-	InputPerMillion      float64 `toml:"input_per_million"`
-	OutputPerMillion     float64 `toml:"output_per_million"`
-	CacheReadPerMillion  float64 `toml:"cache_read_per_million"`
-	CacheWritePerMillion float64 `toml:"cache_write_per_million"`
 }
 
 type Privacy struct {

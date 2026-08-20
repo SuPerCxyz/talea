@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
@@ -25,6 +26,7 @@ import (
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/resume"
 	"github.com/talea/talea/internal/search"
+	"github.com/talea/talea/internal/syncer"
 	"github.com/talea/talea/internal/timeline"
 )
 
@@ -34,6 +36,16 @@ var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.AdaptiveColor{Light: "#C2185B", Dark: "#FF9E80"})
+	// loadingStyle 用于等待动画中的主文案。
+	loadingStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"})
+	errorStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#B00020", Dark: "#FF6E6E"})
+	// loadingDimStyle 用于等待视图中的次要文案。
+	loadingDimStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#9a9a9a"})
 )
 
 // newListDelegate 返回高对比度的列表项样式（每项 3 行：agent+usage / 首问 / 最近消息）。
@@ -84,25 +96,32 @@ func newListStyles() list.Styles {
 	st.PaginationStyle = lipgloss.NewStyle().PaddingLeft(2)
 	st.HelpStyle = lipgloss.NewStyle().Padding(1, 0, 0, 2)
 	st.ActivePaginationDot = lipgloss.NewStyle().
+		Bold(true).
 		Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"}).
-		SetString(bullet)
+		SetString(pageDot + " ")
 	st.InactivePaginationDot = lipgloss.NewStyle().
-		Foreground(subFG).
-		SetString(bullet)
+		Foreground(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#9a9a9a"}).
+		SetString(pageDot + " ")
 	st.DividerDot = lipgloss.NewStyle().
 		Foreground(subFG).
 		SetString(" " + bullet + " ")
 	return st
 }
 
-const bullet = "•"
+const (
+	// bullet 用于状态栏分隔点。
+	bullet = "•"
+	// pageDot 用于分页圆点；加粗高亮后比默认 • 醒目。
+	pageDot = "•"
+)
 
-// loadTuiSessions 加载 TUI 会话列表，dir 非空时仅保留该目录前缀下的会话。
+// loadTuiSessions 加载 TUI 会话列表，dir 非空时仅保留该目录下的会话，
+// agent 非空时仅保留该 Agent 的会话。
 // 固定按结束时间倒序排列（最新结束在前），不受配置 default_sort 影响，
 // 与 talea list / talea go 保持一致。
 // 返回会话列表及对应的 usage 汇总（key=agent_instance_id\x00session_id）。
-func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir string) ([]*model.Session, map[string]timeline.SessionUsageRow, error) {
-	results, err := search.List(ctx, db, search.Query{Cwd: dir, Limit: 500})
+func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir, agent string) ([]*model.Session, map[string]timeline.SessionUsageRow, error) {
+	results, err := search.List(ctx, db, search.Query{Cwd: dir, Agent: agent, Limit: 500})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -193,11 +212,19 @@ func endTs(s *model.Session) int64 {
 }
 
 // Run 启动 TUI。
-// dir 非空时仅列出该目录前缀下的会话。
-func Run(ctx context.Context, dir string) error {
+// dir 非空时仅列出该目录下的会话；agent 非空时仅列出该 Agent 的会话。
+func Run(ctx context.Context, dir, agent string) error {
 	a, err := app.New(ctx)
 	if err != nil {
 		return err
+	}
+	// 将 agent 别名（如 claudecode/codex）规范化为注册表中的 AgentID
+	if agent != "" {
+		id, err := a.ResolveAgent(agent)
+		if err != nil {
+			return err
+		}
+		agent = string(id)
 	}
 	db, err := index.Open(a.Paths.DBPath)
 	if err != nil {
@@ -207,19 +234,9 @@ func Run(ctx context.Context, dir string) error {
 	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
-	// FTS 表同步（快），不阻塞等待增量索引
-	if err := search.Ensure(ctx, db); err != nil {
-		return err
-	}
-	if err := search.Populate(ctx, db); err != nil {
-		return err
-	}
-	sessions, usages, err := loadTuiSessions(ctx, a, db, dir)
-	if err != nil {
-		return err
-	}
-
-	m := newMain(ctx, a, sessions, usages, db, dir)
+	// 进入 TUI 后台同步：首屏先显示等待动画，同步完成后加载最新列表。
+	m := newMain(ctx, a, nil, nil, db, dir, agent)
+	m.loading = true
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	// TUI 已退出并恢复终端，此时再恢复会话，避免在 alt screen 内
@@ -242,7 +259,7 @@ func resumeSession(ctx context.Context, a *app.App, s *model.Session, cwd string
 		return err
 	}
 	if !plan.DirExists {
-		return fmt.Errorf(i18n.Tr("original working directory missing: %s\ntry: talea go %s --cwd <new dir>", "原工作目录不存在：%s\n可以执行：talea go %s --cwd <新目录>"), plan.TargetDir, s.SessionID)
+		return fmt.Errorf(i18n.Tr("original working directory missing: %s\ntry: talea go %s --target <new dir>", "原工作目录不存在：%s\n可以执行：talea go %s --target <新目录>"), plan.TargetDir, s.SessionID)
 	}
 	ad, ok := a.Registry.Get(s.AgentID)
 	if !ok {
@@ -268,21 +285,24 @@ func (m *mainModel) doResume(s *model.Session) tea.Cmd {
 
 // mainModel 是主 TUI 模型。
 type mainModel struct {
-	ctx      context.Context
-	app      *app.App
-	db       *index.DB
-	dir      string
-	sessions []*model.Session
-	usages   map[string]timeline.SessionUsageRow
-	list     list.Model
-	detail   *detailModel
-	keys     keyMap
-	help     help.Model
-	width    int
-	height   int
-	picked   *model.Session
-	indexing bool
-	indexErr error
+	ctx        context.Context
+	app        *app.App
+	db         *index.DB
+	dir        string
+	agent      string
+	sessions   []*model.Session
+	usages     map[string]timeline.SessionUsageRow
+	list       list.Model
+	detail     *detailModel
+	keys       keyMap
+	help       help.Model
+	width      int
+	height     int
+	picked     *model.Session
+	loading    bool  // 首屏同步/加载中（显示等待动画）
+	loadingErr error // 首屏同步或列表加载失败
+	indexErr   error
+	spinner    spinner.Model
 }
 
 type keyMap struct {
@@ -317,13 +337,25 @@ func (i item) FilterValue() string {
 		i.sess.SessionID + " " + i.sess.WorkingDirectory
 }
 
-func newMain(ctx context.Context, a *app.App, sessions []*model.Session, usages map[string]timeline.SessionUsageRow, db *index.DB, dir string) *mainModel {
+func newMain(ctx context.Context, a *app.App, sessions []*model.Session, usages map[string]timeline.SessionUsageRow, db *index.DB, dir, agent string) *mainModel {
 	items := itemsOf(sessions, usages)
 	l := list.New(items, newListDelegate(), 0, 0)
 	l.Title = "Talea · Agent Sessions"
 	l.SetShowStatusBar(true)
 	l.SetFilteringEnabled(true)
+	// 标题与帮助由外层 mainModel.View 统一渲染，禁用 list 内置 title/help 避免重复
+	l.SetShowTitle(false)
+	l.SetShowHelp(false)
 	l.Styles = newListStyles()
+	// bubbles list.New 只把默认圆点写入 Paginator，SetStyles 不会传播；
+	// 显式同步，否则自定义分页圆点样式不生效。
+	l.Paginator.ActiveDot = l.Styles.ActivePaginationDot.String()
+	l.Paginator.InactiveDot = l.Styles.InactivePaginationDot.String()
+
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().
+		Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"})
 
 	km := keyMap{
 		Open:   key.NewBinding(key.WithKeys("o"), key.WithHelp("o", i18n.Tr("resume session", "恢复会话"))),
@@ -338,11 +370,13 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, usages 
 		app:      a,
 		db:       db,
 		dir:      dir,
+		agent:    agent,
 		sessions: sessions,
 		usages:   usages,
 		list:     l,
 		keys:     km,
 		help:     help.New(),
+		spinner:  sp,
 	}
 }
 
@@ -388,20 +422,47 @@ func itemTitle(it item) string {
 
 // metaWidths 定义元数据各字段的固定列宽（Value 区显示宽度）。
 const (
-	metaKeyW      = 6   // Key 区宽（"Branch" 最长 6）
-	metaValStart  = 11  // Start/End：MM-DD HH:MM
-	metaValTime   = 10  // Time：127h31m / 2m
-	metaValToken  = 8   // Token：11.15M / 36.5K
-	metaValCache  = 6   // Cache：99%
-	metaValPath   = 20  // Path：截断
-	metaValBranch = 12  // Branch：截断
-	metaGap       = 4   // 字段间大间隔
+	metaKeyW      = 6  // Key 区宽（"Branch" 最长 6）
+	metaValStart  = 11 // Start/End：MM-DD HH:MM
+	metaValTime   = 10 // Time：127h31m / 2m
+	metaValToken  = 8  // Token：11.15M / 36.5K
+	metaValCache  = 6  // Cache：99%
+	metaValPath   = 20 // Path：截断
+	metaValBranch = 12 // Branch：截断
+	metaGap       = 4  // 字段间大间隔
 )
 
 // metaField 渲染单个 Key+Value 字段（Key 左对齐补宽 + 1 空格 + Value 精确截断补宽）。
 func metaField(key, val string, valW int) string {
 	k := padDisplay(key, metaKeyW)
 	return k + " " + truncPad(val, valW)
+}
+
+// metaFieldHead 同 metaField，但 Value 超宽时省略开头保留末尾（用于路径）。
+func metaFieldHead(key, val string, valW int) string {
+	k := padDisplay(key, metaKeyW)
+	return k + " " + truncHeadPad(val, valW)
+}
+
+// truncHeadPad 保留末尾的截断补齐：超宽时省略开头保留末尾路径，返回宽度 == w。
+func truncHeadPad(s string, w int) string {
+	sw := runewidth.StringWidth(s)
+	if sw <= w {
+		return s + strings.Repeat(" ", w-sw)
+	}
+	// 需要截断：从末尾反向保留 w-1 宽内容，开头加 "…"（1 宽）
+	buf := []rune(s)
+	cur := 0
+	keep := make([]rune, 0, len(buf))
+	for i := len(buf) - 1; i >= 0; i-- {
+		rw := runewidth.RuneWidth(buf[i])
+		if cur+rw > w-1 {
+			break
+		}
+		keep = append([]rune{buf[i]}, keep...)
+		cur += rw
+	}
+	return "…" + string(keep)
 }
 
 // truncPad 按显示宽度精确截断并左对齐补齐，保证返回宽度 == w。
@@ -463,7 +524,7 @@ func metaLine(s *model.Session, u timeline.SessionUsageRow, hasUs bool) string {
 		metaField("Time", dur, metaValTime),
 		metaField("Token", tok, metaValToken),
 		metaField("Cache", cache, metaValCache),
-		metaField("Path", path, metaValPath),
+		metaFieldHead("Path", path, metaValPath),
 		metaField("Branch", branch, metaValBranch),
 	}
 	return strings.Join(fields, strings.Repeat(" ", metaGap))
@@ -520,21 +581,19 @@ func displayAgent(a model.AgentID) string {
 
 // Init 初始化模型。
 func (m *mainModel) Init() tea.Cmd {
-	// 后台增量索引，完成后刷新列表（不阻塞启动）
-	m.indexing = true
-	return m.runIndex
+	// 首屏加载中：启动 spinner 动画并后台同步索引，完成后刷新列表。
+	// 非 loading（测试直接构造已加载列表）时不执行后台同步。
+	if !m.loading {
+		return nil
+	}
+	return tea.Batch(m.spinner.Tick, m.runIndex)
 }
 
 // runIndex 后台执行增量索引并刷新列表。
 func (m *mainModel) runIndex() tea.Msg {
-	_, err := (&index.Indexer{App: m.app, DB: m.db}).Run(m.ctx)
-	if err == nil {
-		err = search.Ensure(m.ctx, m.db)
-	}
-	if err == nil {
-		err = search.Populate(m.ctx, m.db)
-	}
-	m.indexing = false
+	// 与启动时同源（syncer.Sync）：增量索引 + FTS 同步 + 活动状态刷新。
+	// TUI 打开期间的新会话由此兜底刷新，静默 no-op 时成本可忽略。
+	err := syncer.Sync(m.ctx, m.app, m.db)
 	m.indexErr = err
 	return indexedMsg{}
 }
@@ -557,16 +616,24 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detail.contentValid = false
 		}
 		return m, nil
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case indexedMsg:
-		// 索引完成，刷新会话列表
+		// 首屏同步/加载完成，刷新会话列表
 		if m.indexErr != nil {
+			m.loading = false
+			m.loadingErr = m.indexErr
 			return m, nil
 		}
 		if m.detail != nil {
 			return m, nil
 		}
-		sessions, usages, err := loadTuiSessions(m.ctx, m.app, m.db, m.dir)
+		sessions, usages, err := loadTuiSessions(m.ctx, m.app, m.db, m.dir, m.agent)
 		if err != nil {
+			m.loading = false
+			m.loadingErr = err
 			return m, nil
 		}
 		sel := ""
@@ -581,10 +648,18 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.list.Select(idx)
 			}
 		}
+		m.loading = false
 		return m, nil
 	case tea.KeyMsg:
 		if m.detail != nil {
 			return m.handleDetailKey(msg)
+		}
+		// 首屏加载中仅允许退出，避免误触发恢复/详情
+		if m.loading {
+			if key.Matches(msg, m.keys.Quit) {
+				return m, tea.Quit
+			}
+			return m, nil
 		}
 		// 过滤输入中（Filtering）：按键应输入到过滤器，enter 应用过滤，
 		// 不得触发功能键；过滤已应用（FilterApplied）后恢复功能键可进入会话
@@ -638,11 +713,48 @@ func (m *mainModel) View() string {
 	if m.detail != nil {
 		return m.detail.View()
 	}
+	if m.loading || m.loadingErr != nil {
+		return m.loadingView()
+	}
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render(m.list.Title) + "\n\n")
 	sb.WriteString(m.list.View())
 	sb.WriteString("\n" + m.help.View(m.keys))
 	return sb.String()
+}
+
+// loadingView 渲染首屏等待动画或同步失败提示。
+// loadingView 渲染首屏等待动画或同步失败提示，整体水平与垂直居中。
+func (m *mainModel) loadingView() string {
+	var content string
+	if m.loadingErr != nil {
+		content = strings.Join([]string{
+			titleStyle.Render(m.list.Title),
+			"",
+			errorStyle.Render(i18n.Trf("Failed to sync sessions: %v", "同步会话失败：%v", m.loadingErr)),
+			"",
+			loadingDimStyle.Render(i18n.Tr("Press q to quit", "按 q 退出")),
+		}, "\n")
+	} else {
+		content = strings.Join([]string{
+			titleStyle.Render(m.list.Title),
+			"",
+			m.spinner.View() + " " +
+				loadingStyle.Render(i18n.Tr("Syncing sessions…", "正在同步会话…")),
+			"",
+			loadingDimStyle.Render(i18n.Tr("This may take a moment on first run or after a long idle.", "首次运行或久未使用可能需要稍等片刻。")),
+			loadingDimStyle.Render(i18n.Tr("Press q to quit", "按 q 退出")),
+		}, "\n")
+	}
+	if m.width > 0 && m.height > 0 {
+		// 水平 + 垂直居中
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+	}
+	if m.width > 0 {
+		// 尚无高度信息时退化为水平居中
+		return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, content)
+	}
+	return content
 }
 
 // showDetail 进入详情页。

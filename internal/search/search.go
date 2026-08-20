@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,6 +23,17 @@ type Query struct {
 	Branch    string
 	SinceDays int
 	Limit     int
+}
+
+// dirPrefix 将目录过滤参数规范化为绝对路径。
+// 支持相对路径（./、../）与末尾斜杠：先解析为绝对路径，再清理，
+// 保证与索引中记录的绝对工作目录精确匹配一致。
+func dirPrefix(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(dir)
 }
 
 // Result 是单条搜索结果。
@@ -179,8 +191,8 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		args = append(args, q.Agent)
 	}
 	if q.Cwd != "" {
-		where = append(where, `s.working_directory LIKE ?`)
-		args = append(args, q.Cwd+"%")
+		where = append(where, `s.working_directory = ?`)
+		args = append(args, dirPrefix(q.Cwd))
 	}
 	if q.Project != "" {
 		where = append(where, `s.project_name LIKE ?`)

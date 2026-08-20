@@ -21,18 +21,19 @@ import (
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/search"
+	"github.com/talea/talea/internal/syncer"
 )
 
 func newGoCmd() *cobra.Command {
 	var (
-		cwdFlag    string
-		dirFlag    string
+		targetFlag string
+		pathFlag   string
 		dryRunFlag bool
 	)
 	cmd := &cobra.Command{
 		Use:   "go [session-id]",
 		Short: i18n.Tr("pick a session by ID (full or prefix) and resume it", "按会话 ID（完整或前缀）选择并进入"),
-		Long:  i18n.Tr("With a session ID, resumes it directly; the ID may be a full or partial prefix and is matched automatically. If the prefix is ambiguous, lists matching sessions. Without a session ID, opens an interactive table picker; select and press Enter to resume. Use --dir to restrict the picker to sessions under a directory.", "带会话 ID 时直接恢复，ID 可为完整或前缀片段并自动匹配；前缀有歧义时列出候选。不带会话 ID 时进入交互式表格选择器，选中后 Enter 恢复。可用 --dir 将选择器限定为指定目录下的会话。"),
+		Long:  i18n.Tr("With a session ID, resumes it directly; the ID may be a full or partial prefix and is matched automatically. If the prefix is ambiguous, lists matching sessions. Without a session ID, opens an interactive table picker; select and press Enter to resume. Use --path to restrict the picker to sessions in a directory.", "带会话 ID 时直接恢复，ID 可为完整或前缀片段并自动匹配；前缀有歧义时列出候选。不带会话 ID 时进入交互式表格选择器，选中后 Enter 恢复。可用 --path 将选择器限定为指定目录下的会话（不含子目录）。"),
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -45,16 +46,16 @@ func newGoCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return resumeSession(ctx, a, sess, cwdFlag, dryRunFlag)
+				return resumeSession(ctx, a, sess, targetFlag, dryRunFlag)
 			}
 			if !isTTY(os.Stdin) {
 				return exitError{code: ExitUsage, msg: i18n.Tr("interactive picker needs a terminal; specify a session ID: talea go <session-id>", "交互式选择需要终端，请指定会话 ID：talea go <session-id>")}
 			}
-			return goSelect(ctx, a, dirFlag, cwdFlag, dryRunFlag)
+			return goSelect(ctx, a, pathFlag, targetFlag, dryRunFlag)
 		},
 	}
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", i18n.Tr("target directory (override original)", "目标目录（覆盖原目录）"))
-	cmd.Flags().StringVarP(&dirFlag, "dir", "d", "", i18n.Tr("filter picker to sessions under this directory", "仅列出该目录下的会话"))
+	cmd.Flags().StringVar(&targetFlag, "target", "", i18n.Tr("target directory (override original)", "目标目录（覆盖原目录）"))
+	cmd.Flags().StringVarP(&pathFlag, "path", "p", "", i18n.Tr("filter picker to sessions in this directory", "仅列出该目录下的会话（不含子目录）"))
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, i18n.Tr("print resume command only", "仅打印恢复命令"))
 	return cmd
 }
@@ -82,9 +83,9 @@ func (k goKeys) FullHelp() [][]key.Binding {
 	return [][]key.Binding{{k.Enter, k.Quit}}
 }
 
-// loadGoSessions 加载交互选择器候选会话，dir 非空时仅保留该目录前缀下的会话，
+// loadGoSessions 加载交互选择器候选会话，path 非空时仅保留该目录前缀下的会话，
 // 并按会话结束时间降序排序（最新结束在前）。
-func loadGoSessions(ctx context.Context, a *app.App, dir string) ([]*model.Session, error) {
+func loadGoSessions(ctx context.Context, a *app.App, path string) ([]*model.Session, error) {
 	db, err := index.Open(a.Paths.DBPath)
 	if err != nil {
 		return nil, err
@@ -93,16 +94,16 @@ func loadGoSessions(ctx context.Context, a *app.App, dir string) ([]*model.Sessi
 	if err := db.Migrate(ctx); err != nil {
 		return nil, err
 	}
-	if err := autoIndex(ctx, a, db); err != nil {
+	if err := syncer.Sync(ctx, a, db); err != nil {
 		return nil, err
 	}
-	return queryGoSessions(ctx, db, dir)
+	return queryGoSessions(ctx, db, path)
 }
 
-// queryGoSessions 从索引查询选择器候选会话，dir 非空时仅保留该目录前缀下的会话，
+// queryGoSessions 从索引查询选择器候选会话，path 非空时仅保留该目录前缀下的会话，
 // 并按会话结束时间降序排序（最新结束在前）。
-func queryGoSessions(ctx context.Context, db *index.DB, dir string) ([]*model.Session, error) {
-	results, err := search.List(ctx, db, search.Query{Cwd: dir, Limit: 200})
+func queryGoSessions(ctx context.Context, db *index.DB, path string) ([]*model.Session, error) {
+	results, err := search.List(ctx, db, search.Query{Cwd: path, Limit: 200})
 	if err != nil {
 		return nil, err
 	}
@@ -117,10 +118,10 @@ func queryGoSessions(ctx context.Context, db *index.DB, dir string) ([]*model.Se
 }
 
 // goSelect 启动交互式选择器，选中后恢复会话。
-// dir 非空时仅列出该目录前缀下的会话。
-// cwd 非空时覆盖目标目录；dryRun 为 true 时仅打印恢复命令。
-func goSelect(ctx context.Context, a *app.App, dir, cwd string, dryRun bool) error {
-	sessions, err := loadGoSessions(ctx, a, dir)
+// path 非空时仅列出该目录前缀下的会话。
+// target 非空时覆盖目标目录；dryRun 为 true 时仅打印恢复命令。
+func goSelect(ctx context.Context, a *app.App, path, target string, dryRun bool) error {
+	sessions, err := loadGoSessions(ctx, a, path)
 	if err != nil {
 		return err
 	}
@@ -134,7 +135,7 @@ func goSelect(ctx context.Context, a *app.App, dir, cwd string, dryRun bool) err
 	}
 	// Bubble Tea 已退出并恢复终端，此时执行选中会话的恢复
 	if m.picked >= 0 && m.picked < len(m.sess) {
-		return resumeSession(ctx, a, m.sess[m.picked], cwd, dryRun)
+		return resumeSession(ctx, a, m.sess[m.picked], target, dryRun)
 	}
 	return nil
 }

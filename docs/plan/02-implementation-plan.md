@@ -39,7 +39,6 @@ talea/
 │   ├── timeline/               # 时间线聚合、桶、轮次
 │   ├── usage/                  # Token 汇总/去重
 │   ├── doctor/                 # 环境诊断
-│   ├── preview/                # 对话预览
 │   ├── app/                    # 业务编排
 │   ├── cli/                    # cobra 命令
 │   ├── tui/                    # Bubble Tea 界面
@@ -114,15 +113,14 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 ### Phase 3：搜索
 
 - [x] `internal/search`：FTS5 建表 + 权重（§20）+ 过滤参数
-- [x] `talea search "kw" --agent --cwd --since`
+- [x] `talea search "kw" --agent --cwd --since`（**已删除**：CLI search 命令移除，搜索能力保留在 TUI）
 - [x] 中文搜索测试
 
 ### Phase 4：CLI 命令面
 
 - [x] `talea list`（--agent/--cwd/--today/--active/--include-subagents/--sort/--limit/--format）
 - [x] `talea go`（含 --dry-run、--cwd 覆盖、路径映射、目录缺失交互；session id 支持完整或前缀自动匹配；无 ID 交互式选择）
-- [x] `talea usage` / `talea timeline`（P1 前置的 CLI 骨架）
-- [x] `talea last` / `talea config path|init|validate`
+- [x] `talea config path|init|validate`
 - [x] `talea doctor`（骨架 → Phase 6 完善）
 - [x] 退出码规范（§26）
 - [x] JSON/table/csv/markdown 输出
@@ -145,22 +143,17 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 - [x] 会话列表（列动态隐藏、中文宽度、排序、搜索过滤、agent 名固定 10 宽对齐）
 - [x] 详情页聚合展示（会话信息双列 / 上下文曲线 Area / 按模型汇总 / Token 图表 / Token 汇总 / 子 Agent；t 键折叠用户轮次）
-- [ ] 详情页对话预览（p 键）—— **已移除**，改为详情页聚合展示；CLI `talea preview` 保留
+- [ ] 详情页对话预览（p 键）—— **已移除**，改为详情页聚合展示；CLI `talea preview` 已删除
 - [x] Enter 恢复流程
 - [x] 活动状态、进行中标识
-- [ ] Token 时间线独立页 —— **已移除**，图表并入聚合详情页；CLI `talea timeline` 保留
+- [ ] Token 时间线独立页 —— **已移除**，图表并入聚合详情页；CLI `talea timeline` 已删除
 
 ### Phase 8：P1 — Token 汇总与时间线（已完成）
 
 - [x] `internal/usage`：三 Agent 汇总、delta/cumulative 去重、峰值、子 Agent
 - [x] `internal/timeline`：事件模型、请求/轮次/上下文/压缩、时间桶、图表聚合
-      （含 terminal chart 包：柱状图/折线图/比例条，usage --metrics 指标）
-- [x] `talea usage --details` / `talea timeline --group-by --bucket --around-peak`
 - [x] CSV/JSON/Markdown 导出
-- [x] 费用估算（`[usage]` 配置，默认关，整数微计价单位）
-- [x] 本地规则 Token 洞察（`internal/insights`）
 - [x] 按模型汇总 / 上下文曲线 / 压缩检测
-- [x] `talea run`（PID 包装启动）
 - [x] 新增 generic JSONL 适配器作为扩展模板
 
 ### Phase 9：质量收尾（已完成）
@@ -168,7 +161,7 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 - [x] golangci-lint 配置 + 全绿（v2.12.2，0 issues）
 - [x] go vet
 - [x] 性能测试（1000/10000 会话、10 万事件）
-      实测（2026-08-06）：10000 会话二次索引 0.82s、list/search 0.7s
+      实测（2026-08-06）：10000 会话二次索引 0.82s、list 0.7s
       （含 0.6s 进程冷启动）、10 万事件上下文曲线 0.9s
 - [x] 安全测试组
 - [x] GitHub Actions CI（lint + test + build amd64/arm64）
@@ -180,15 +173,13 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 - [x] 活动状态检测（/proc 进程 + 文件更新时间，`list --active` 生效）
 - [x] 目录缺失交互处理（**已简化**：提示新目录或默认 /tmp；非 TTY 直接 /tmp）
-- [x] search/list 过滤补全（--project / --branch）
+- [x] list 过滤补全（--project / --branch）
 - [x] doctor 增强（索引格式/Token 完整性/FTS/路径映射冲突）
-- [x] 会话标签 / 收藏 / 备注（`talea tag`）
+- [x] 会话标签 / 收藏 / 备注（`internal/tags`，web/transfer 使用；CLI `talea tag` 已删除）
 - [x] 外部适配器协议（`talea-adapter-<name>` JSON stdio，
       7 方法：info/detect/discover/parse/messages/usage/timeline）
-- [x] `talea run` 真实进程时间回写（process_start/process_exit）
 - [x] 本地 Web 只读视图（`talea web`，仅 127.0.0.1）
 - [x] 多设备离线导入导出（`talea export` / `talea import`）
-- [x] `talea watch`：fsnotify 监听数据目录 + 事件合并增量索引（可选，非必需）
 
 ## 4. 关键设计决定（已确定）
 
@@ -215,8 +206,8 @@ P0 前期两个技术验证点（做骨架时一并完成）：
 
 ## 6. 验收对照
 
-- P0 完成：`doctor` / `list` / `search` / `go --dry-run` / TUI Enter 恢复，全绿。
-- P1 完成：`usage` / `timeline` 全字段展示。
+- P0 完成：`doctor` / `list` / `go --dry-run` / TUI Enter 恢复，全绿。
+- P1 完成：`internal/timeline` / `internal/usage` 全字段数据接入与 TUI 详情页展示。
 
 ## 7. 风险与缓解
 

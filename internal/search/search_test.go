@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -178,6 +179,54 @@ func TestSearchFilters(t *testing.T) {
 	}
 	if len(res) != 1 || res[0].Session.SessionID != "s2" {
 		t.Fatalf("cwd filter: %d results", len(res))
+	}
+}
+
+// TestSearchDirPrefixNormalization 回归：目录过滤需规范化相对路径（./、../）与末尾斜杠，
+// 且为精确匹配：只命中工作目录 == 指定目录的会话，不包含子目录。
+func TestSearchDirPrefixNormalization(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	insertSession(t, db, mkSession("s1", "问题一", "/home/alice/code/a", "claude-code"))
+	if err := Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 将测试会话的工作目录改为相对于当前进程 cwd 的某路径，便于用相对写法过滤
+	absTarget := filepath.Join(cwd, "relproj")
+	insertSession(t, db, mkSession("s2", "问题二", absTarget, "opencode"))
+	// 子目录中的会话不应被父目录过滤命中
+	insertSession(t, db, mkSession("s3", "问题三", filepath.Join(absTarget, "sub"), "opencode"))
+	if err := Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		dir  string
+		want int
+	}{
+		{"exact absolute", absTarget, 1},
+		{"trailing slash", absTarget + "/", 1},
+		{"relative with dot", filepath.Join(".", "relproj"), 1},
+		{"parent then child", filepath.Join("..", filepath.Base(cwd), "relproj"), 1},
+		{"subdir not matched", filepath.Join(absTarget, "sub"), 1},
+		{"parent does not match subdir", absTarget, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res, err := Search(ctx, db, Query{Cwd: c.dir, Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res) != c.want {
+				t.Fatalf("dir %q: got %d results, want %d", c.dir, len(res), c.want)
+			}
+		})
 	}
 }
 

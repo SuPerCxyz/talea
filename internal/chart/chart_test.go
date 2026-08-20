@@ -3,6 +3,8 @@ package chart
 import (
 	"strings"
 	"testing"
+
+	"github.com/mattn/go-runewidth"
 )
 
 func TestBar(t *testing.T) {
@@ -69,6 +71,54 @@ func TestArea(t *testing.T) {
 func TestAreaEmpty(t *testing.T) {
 	if out := Area(nil, nil, 8, 0, 40); out != "" {
 		t.Fatalf("expected empty, got %q", out)
+	}
+}
+
+// TestAreaStretch 数据点少于绘图宽度时应拉伸占满，且时间轴带 y 轴前缀对齐。
+func TestAreaStretch(t *testing.T) {
+	vals := []float64{100, 300, 200}
+	labels := []string{"09:00", "09:05", "09:10"}
+	plotW := 10
+	yW := AxisWidth(300)
+	out := Area(vals, labels, 9, yW, plotW)
+	rows := strings.Split(out, "\n")
+	if len(rows) != 10 {
+		t.Fatalf("expected 10 rows (9 plot + 1 time axis), got %d", len(rows))
+	}
+	for _, r := range rows[:9] {
+		if runewidth.StringWidth(r) != yW+plotW {
+			t.Fatalf("plot row width=%d want %d: %q", runewidth.StringWidth(r), yW+plotW, r)
+		}
+	}
+	// 时间轴行应与绘图区同宽且带 y 轴前缀
+	if got := runewidth.StringWidth(rows[9]); got != yW+plotW {
+		t.Fatalf("time axis width=%d want %d", got, yW+plotW)
+	}
+	if !strings.HasPrefix(rows[9], strings.Repeat(" ", yW)) {
+		t.Fatalf("time axis should be offset by yWidth: %q", rows[9])
+	}
+}
+
+// TestBarStretch 柱数少于目标列时应拉伸占满宽度。
+func TestBarStretch(t *testing.T) {
+	vals := []float64{128.7, 47.6, 334.8, 49.3}
+	labels := []string{"09:20", "09:25", "09:30", "09:35"}
+	maxCols := 40
+	yW := AxisWidth(334.8)
+	out := BarW(vals, labels, 6, maxCols)
+	rows := strings.Split(out, "\n")
+	if len(rows) < 8 {
+		t.Fatalf("expected >=8 rows, got %d", len(rows))
+	}
+	// 柱行（含 y 轴）总宽应为 yWidth + 2*maxCols
+	if got := runewidth.StringWidth(rows[0]); got != yW+maxCols*2 {
+		t.Fatalf("bar row width=%d want %d", got, yW+maxCols*2)
+	}
+	// 数值刻度与时间标签均带 y 轴前缀
+	for _, r := range rows[6:] {
+		if runewidth.StringWidth(r) < yW {
+			t.Fatalf("row width=%d < yWidth=%d: %q", runewidth.StringWidth(r), yW, r)
+		}
 	}
 }
 

@@ -112,7 +112,6 @@ func (d *detailModel) renderContext() string {
 	if len(pts) == 0 {
 		return i18n.Tr("No context window data", "没有上下文窗口数据")
 	}
-	comps, _ := timeline.DetectCompactions(d.ctx, d.db, d.sess.AgentInstanceID, d.sess.SessionID)
 	var sb strings.Builder
 	sb.WriteString(labelStyle.Render(i18n.Tr("Context window (tokens):", "上下文窗口（Token）：")) + "\n")
 	vals := make([]float64, len(pts))
@@ -121,26 +120,18 @@ func (d *detailModel) renderContext() string {
 		vals[i] = float64(p.Context)
 		labels[i] = time.Unix(p.Timestamp, 0).Format("15:04")
 	}
-	plotW := d.width - 8
-	if plotW < 30 {
-		plotW = 30
+	// 按实际 y 轴宽度铺满整个终端宽度，柱数（数据点）随之增加
+	yW := chart.AxisWidth(peakVal(vals))
+	maxCols := (d.width - yW) / 2
+	if maxCols < 20 {
+		maxCols = 20
 	}
-	sb.WriteString(chart.Area(vals, labels, 9, 0, plotW) + "\n")
+	sb.WriteString(chart.BarW(vals, labels, 6, maxCols) + "\n")
 	// 起点/峰值/终点标注
 	sb.WriteString(fmt.Sprintf("%s %s  %s %s  %s %s\n",
 		i18n.Tr("start", "起点"), humanNum(pts[0].Context),
 		i18n.Tr("peak", "峰值"), humanNum(int64(peakVal(vals))),
 		i18n.Tr("end", "终点"), humanNum(pts[len(pts)-1].Context)))
-	if len(comps) > 0 {
-		sb.WriteString("\n" + i18n.Tr("Context compaction:", "上下文压缩：") + "\n")
-		for _, c := range comps {
-			label := i18n.Tr("explicit compaction", "明确压缩")
-			if c.IsInferred {
-				label = i18n.Tr("possible compaction", "可能发生上下文压缩")
-			}
-			sb.WriteString(fmt.Sprintf("  %s → %s（%s）\n", humanNum(c.Before), humanNum(c.After), label))
-		}
-	}
 	return sb.String()
 }
 
@@ -167,14 +158,36 @@ func (d *detailModel) renderModel() string {
 	if len(sums) == 0 {
 		return i18n.Tr("This session has no model data", "该会话没有模型数据")
 	}
+	// 固定列宽：模型列 30（超长截断），数值列 6（容纳 999.9K），间隔 4
+	const (
+		modelW = 30
+		numW   = 6
+		gap    = 4
+	)
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render(i18n.Tr("Models Summary", "按模型汇总")) + "\n\n")
-	sb.WriteString(fmt.Sprintf("%-24s  %-8s  %-10s  %-10s  %-10s\n",
-		i18n.Tr("Model", "模型"), i18n.Tr("Req", "请求"),
-		i18n.Tr("Input", "输入"), i18n.Tr("Output", "输出"), i18n.Tr("Total", "总计")))
+	sep := strings.Repeat(" ", gap)
+	cells := []string{
+		padRight(i18n.Tr("Model", "模型"), modelW),
+		padRight(i18n.Tr("Req", "请求"), numW),
+		padRight(i18n.Tr("Input", "输入"), numW),
+		padRight(i18n.Tr("Output", "输出"), numW),
+		padRight(i18n.Tr("Total", "总计"), numW),
+	}
+	sb.WriteString(strings.Join(cells, sep) + "\n")
 	for _, m := range sums {
-		sb.WriteString(fmt.Sprintf("%-24s  %-8d  %-10s  %-10s  %-10s\n",
-			m.Model, m.Requests, humanNum(m.InputTokens), humanNum(m.OutputTokens), humanNum(m.TotalTokens)))
+		model := m.Model
+		if runewidth.StringWidth(model) > modelW {
+			model = truncWidth(model, modelW-1) + "…"
+		}
+		cells := []string{
+			padRight(model, modelW),
+			padRight(fmt.Sprintf("%d", m.Requests), numW),
+			padRight(humanNum(m.InputTokens), numW),
+			padRight(humanNum(m.OutputTokens), numW),
+			padRight(humanNum(m.TotalTokens), numW),
+		}
+		sb.WriteString(strings.Join(cells, sep) + "\n")
 	}
 	return sb.String()
 }
@@ -224,7 +237,9 @@ func (d *detailModel) renderCharts() string {
 		labels[i] = b.Start.Format("15:04")
 	}
 	sb.WriteString(labelStyle.Render(i18n.Tr("Tokens/min (5-min buckets):", "Token/分钟（每 5 分钟桶）：")) + "\n")
-	maxCols := (d.width - 10) / 2
+	// 按实际 y 轴宽度铺满整个终端宽度，柱数（数据点）随之增加
+	yW := chart.AxisWidth(peakVal(vals))
+	maxCols := (d.width - yW) / 2
 	if maxCols < 20 {
 		maxCols = 20
 	}
@@ -314,6 +329,32 @@ func truncRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// truncWidth 按显示宽度截断字符串（保留前 n 列，不含省略号）。
+func truncWidth(s string, n int) string {
+	if runewidth.StringWidth(s) <= n {
+		return s
+	}
+	var out []rune
+	w := 0
+	for _, r := range s {
+		rw := runewidth.RuneWidth(r)
+		if w+rw > n {
+			break
+		}
+		out = append(out, r)
+		w += rw
+	}
+	return string(out)
+}
+
+// padRight 左对齐并补齐到指定显示宽度（按显示宽度计算，兼容中文）。
+func padRight(s string, w int) string {
+	if runewidth.StringWidth(s) >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-runewidth.StringWidth(s))
 }
 
 // renderDetail 渲染会话详情文本。
