@@ -740,9 +740,8 @@ func (m *mainModel) loadingView() string {
 			titleStyle.Render(m.list.Title),
 			"",
 			m.spinner.View() + " " +
-				loadingStyle.Render(i18n.Tr("Syncing sessions…", "正在同步会话…")),
+				loadingStyle.Render(i18n.Tr("Syncing sessions; may take longer with large data", "正在同步会话，数据量大时可能稍慢")),
 			"",
-			loadingDimStyle.Render(i18n.Tr("This may take a moment on first run or after a long idle.", "首次运行或久未使用可能需要稍等片刻。")),
 			loadingDimStyle.Render(i18n.Tr("Press q to quit", "按 q 退出")),
 		}, "\n")
 	}
