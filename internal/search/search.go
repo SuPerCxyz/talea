@@ -168,19 +168,15 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 	}
 
 	var (
-		where   []string
-		args    []any
-		hasTerm bool
+		where []string
+		args  []any
 	)
 	if q.Term != "" {
 		if utf8.RuneCountInString(q.Term) >= 3 {
-			// 3 字以上走 FTS5，带列权重排序（bm25，权重按列序：
-			// session_id=10, first_question=5, working_directory=3,
-			// project_name=2, git_branch=1）
+			// 3 字以上走 FTS5（trigram）
 			where = append(where, `EXISTS(SELECT 1 FROM session_fts f
 				WHERE f.rowid = s.rowid AND session_fts MATCH ?)`)
 			args = append(args, ftsTerm(q.Term))
-			hasTerm = true
 		} else {
 			where = append(where, `(s.session_id = ? OR s.first_question LIKE ? OR s.working_directory LIKE ?)`)
 			args = append(args, q.Term, "%"+q.Term+"%", "%"+q.Term+"%")
@@ -210,14 +206,11 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		where = append(where, `1=1`)
 	}
 
-	// 关键词搜索时按 FTS 相关度排序（列权重），否则按最近活动
-	orderBy := "s.last_activity_at DESC"
-	scoreExpr := "0.0"
-	if hasTerm {
-		orderBy = "score"
-		scoreExpr = `(SELECT bm25(session_fts, 10.0, 5.0, 3.0, 2.0, 1.0)
-		          FROM session_fts f WHERE f.rowid = s.rowid AND session_fts MATCH ?)`
-	}
+	// 所有结果统一按结束时间倒序（最新结束在前），兜底顺序与展示层
+	// endTs 一致：ended_at > started_at > last_activity_at；
+	// rowid 作同时间的稳定次级键。LIMIT 在此排序后应用，保证截断窗口
+	// 内外顺序一致，不丢结束时间更新的会话。
+	orderBy := "COALESCE(s.ended_at, s.started_at, s.last_activity_at) DESC, s.rowid DESC"
 
 	query := fmt.Sprintf(`
 		SELECT s.agent_id, s.agent_instance_id, s.session_id,
@@ -231,24 +224,17 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		       s.working_dir_exists, s.project_name, s.git_root, s.git_remote,
 		       s.activity_state,
 		       u.input_tokens, u.output_tokens, u.total_tokens, u.peak_context_tokens,
-		       %s AS score
+		       0.0 AS score
 		FROM sessions s
 		LEFT JOIN session_usage u
 		       ON u.agent_instance_id = s.agent_instance_id AND u.session_id = s.session_id
 		WHERE %s
 		ORDER BY %s
 		LIMIT ?`,
-		scoreExpr, strings.Join(where, " AND "), orderBy)
-	// scoreExpr 的 MATCH ? 在 SELECT 中最先出现，必须置于参数最前；
-	// 否则后续 where 参数（如 agent 过滤）会与 EXISTS 的 MATCH ? 错位。
-	queryArgs := make([]any, 0, len(args)+2)
-	if hasTerm {
-		queryArgs = append(queryArgs, ftsTerm(q.Term))
-	}
-	queryArgs = append(queryArgs, args...)
-	queryArgs = append(queryArgs, limit)
+		strings.Join(where, " AND "), orderBy)
+	args = append(args, limit)
 
-	rows, err := db.SQL().QueryContext(ctx, query, queryArgs...)
+	rows, err := db.SQL().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +277,7 @@ func ByIDPrefix(ctx context.Context, db *index.DB, prefix, agent string, limit i
 		LEFT JOIN session_usage u
 		       ON u.agent_instance_id = s.agent_instance_id AND u.session_id = s.session_id
 		WHERE %s
-		ORDER BY s.last_activity_at DESC
+		ORDER BY COALESCE(s.ended_at, s.started_at, s.last_activity_at) DESC, s.rowid DESC
 		LIMIT ?`, where)
 	args = append(args, limit)
 	rows, err := db.SQL().QueryContext(ctx, query, args...)
@@ -355,7 +341,7 @@ func scanSessions(rows *sql.Rows) ([]Result, error) {
 			u.PeakContextTokens = nn(peakTok)
 			s.TokenUsage = u
 		}
-		out = append(out, Result{Session: s, Score: -score}) // bm25 为负分，越小越相关
+		out = append(out, Result{Session: s, Score: -score})
 	}
 	return out, rows.Err()
 }

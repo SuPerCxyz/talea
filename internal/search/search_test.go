@@ -241,3 +241,95 @@ func TestListEmpty(t *testing.T) {
 		t.Fatalf("expected empty, got %d", len(res))
 	}
 }
+
+// TestSearchOrderByEndTime 回归：所有搜索结果必须按结束时间倒序
+// （兜底顺序 ended_at > started_at > last_activity_at），
+// 不得依赖 last_activity_at，且关键词搜索同样适用。
+func TestSearchOrderByEndTime(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	base := time.Date(2026, 8, 26, 12, 0, 0, 0, time.Local)
+
+	mk := func(id string, started, ended, last *time.Time) *model.Session {
+		s := mkSession(id, "multipath 排序验证", "/home/alice/code/sort", "claude-code")
+		s.StartedAt = started
+		s.EndedAt = ended
+		s.LastActivityAt = last
+		return s
+	}
+	at := func(h int) *time.Time {
+		ts := base.Add(time.Duration(h) * time.Hour)
+		return &ts
+	}
+	// last_activity 与 ended 顺序刻意相反，证明排序键不是 last_activity_at
+	insertSession(t, db, mk("s_old", at(0), at(1), at(9)))
+	insertSession(t, db, mk("s_nofallback", nil, nil, at(2))) // 仅 last_activity 兜底
+	insertSession(t, db, mk("s_new", at(0), at(5), at(5)))
+	insertSession(t, db, mk("s_startfallback", at(8), nil, at(0))) // 无结束时间回退开始时间
+	insertSession(t, db, mk("s_mid", at(0), at(3), at(7)))
+	if err := Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"s_startfallback", "s_new", "s_mid", "s_nofallback", "s_old"}
+	for _, tc := range []struct {
+		name string
+		q    Query
+	}{
+		{"no term", Query{Limit: 10}},
+		{"with term (FTS)", Query{Term: "multipath", Limit: 10}},
+		{"with term (FTS zh)", Query{Term: "排序验证", Limit: 10}},
+		{"with term (LIKE)", Query{Term: "排序", Limit: 10}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Search(ctx, db, tc.q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, r := range res {
+				got = append(got, r.Session.SessionID)
+			}
+			if len(got) != len(want) {
+				t.Fatalf("got %d results, want %d: %v", len(got), len(want), got)
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("order mismatch:\n got  %v\n want %v", got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestByIDPrefixOrderByEndTime 验证 ID 前缀多候选时也按结束时间倒序。
+func TestByIDPrefixOrderByEndTime(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	base := time.Now()
+
+	mkAt := func(id string, offset time.Duration) *model.Session {
+		s := mkSession(id, "q", "/home/alice", "opencode")
+		end := base.Add(offset)
+		s.EndedAt = &end
+		s.LastActivityAt = &base // last_activity 固定，排序只应由 ended 决定
+		return s
+	}
+	insertSession(t, db, mkAt("pfx_early", 1*time.Hour))
+	insertSession(t, db, mkAt("pfx_late", 6*time.Hour))
+	if err := Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ByIDPrefix(ctx, db, "pfx_", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("got %d results, want 2", len(res))
+	}
+	if res[0].Session.SessionID != "pfx_late" || res[1].Session.SessionID != "pfx_early" {
+		t.Fatalf("order: [%s, %s], want [pfx_late, pfx_early]",
+			res[0].Session.SessionID, res[1].Session.SessionID)
+	}
+}

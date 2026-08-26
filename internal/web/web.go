@@ -84,7 +84,9 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if v := r.URL.Query().Get("q"); v != "" {
 		q.Term = v
 	}
-	results, err := search.List(ctx, s.DB, q)
+	// 用 Search 而非 List：List 会清空 Term 导致 Web 端关键词过滤失效；
+	// 排序由 Search 的 SQL 保证（按结束时间倒序）。
+	results, err := search.Search(ctx, s.DB, q)
 	if err != nil {
 		writeJSONErr(w, err)
 		return
