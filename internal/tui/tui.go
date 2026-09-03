@@ -40,6 +40,9 @@ var (
 	loadingStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"})
+	// loadingDoneStyle 用于已完成的等待阶段。
+	loadingDoneStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#2E7D32", Dark: "#9BE564"})
 	errorStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.AdaptiveColor{Light: "#B00020", Dark: "#FF6E6E"})
@@ -234,10 +237,11 @@ func Run(ctx context.Context, dir, agent string) error {
 	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
-	// 进入 TUI 后台同步：首屏先显示等待动画，同步完成后加载最新列表。
+	// 进入 TUI 后台同步：先显示等待动画，同步完成后加载最新列表。
 	m := newMain(ctx, a, nil, nil, db, dir, agent)
 	m.loading = true
 	p := tea.NewProgram(m, tea.WithAltScreen())
+	m.send = p.Send
 	_, err = p.Run()
 	// TUI 已退出并恢复终端，此时再恢复会话，避免在 alt screen 内
 	// 嵌套启动 agent 导致退出后终端错位/光标丢失
@@ -285,24 +289,26 @@ func (m *mainModel) doResume(s *model.Session) tea.Cmd {
 
 // mainModel 是主 TUI 模型。
 type mainModel struct {
-	ctx        context.Context
-	app        *app.App
-	db         *index.DB
-	dir        string
-	agent      string
-	sessions   []*model.Session
-	usages     map[string]timeline.SessionUsageRow
-	list       list.Model
-	detail     *detailModel
-	keys       keyMap
-	help       help.Model
-	width      int
-	height     int
-	picked     *model.Session
-	loading    bool  // 首屏同步/加载中（显示等待动画）
-	loadingErr error // 首屏同步或列表加载失败
-	indexErr   error
-	spinner    spinner.Model
+	ctx          context.Context
+	app          *app.App
+	db           *index.DB
+	dir          string
+	agent        string
+	sessions     []*model.Session
+	usages       map[string]timeline.SessionUsageRow
+	list         list.Model
+	detail       *detailModel
+	keys         keyMap
+	help         help.Model
+	width        int
+	height       int
+	picked       *model.Session
+	loading      bool  // 启动同步/加载中（显示等待动画）
+	loadingErr   error // 启动同步或列表加载失败
+	loadingStage syncer.Stage
+	indexErr     error
+	spinner      spinner.Model
+	send         func(tea.Msg)
 }
 
 type keyMap struct {
@@ -581,7 +587,7 @@ func displayAgent(a model.AgentID) string {
 
 // Init 初始化模型。
 func (m *mainModel) Init() tea.Cmd {
-	// 首屏加载中：启动 spinner 动画并后台同步索引，完成后刷新列表。
+	// 启动同步中：启动 spinner 动画并后台同步索引，完成后刷新列表。
 	// 非 loading（测试直接构造已加载列表）时不执行后台同步。
 	if !m.loading {
 		return nil
@@ -591,11 +597,20 @@ func (m *mainModel) Init() tea.Cmd {
 
 // runIndex 后台执行增量索引并刷新列表。
 func (m *mainModel) runIndex() tea.Msg {
-	// 与启动时同源（syncer.Sync）：增量索引 + FTS 同步 + 活动状态刷新。
+	// 与其他读取路径同源：增量索引 + FTS 同步 + 活动状态刷新。
 	// TUI 打开期间的新会话由此兜底刷新，静默 no-op 时成本可忽略。
-	err := syncer.Sync(m.ctx, m.app, m.db)
+	err := syncer.SyncWithProgress(m.ctx, m.app, m.db, func(stage syncer.Stage) {
+		if m.send != nil {
+			m.send(loadingStageMsg{stage: stage})
+		}
+	})
 	m.indexErr = err
 	return indexedMsg{}
+}
+
+// loadingStageMsg 通知 TUI 更新加载阶段。
+type loadingStageMsg struct {
+	stage syncer.Stage
 }
 
 // indexedMsg 通知索引完成。
@@ -620,8 +635,13 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+	case loadingStageMsg:
+		if m.loading {
+			m.loadingStage = msg.stage
+		}
+		return m, nil
 	case indexedMsg:
-		// 首屏同步/加载完成，刷新会话列表
+		// 启动同步/加载完成，刷新会话列表
 		if m.indexErr != nil {
 			m.loading = false
 			m.loadingErr = m.indexErr
@@ -654,7 +674,7 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.detail != nil {
 			return m.handleDetailKey(msg)
 		}
-		// 首屏加载中仅允许退出，避免误触发恢复/详情
+		// 启动同步中仅允许退出，避免误触发恢复/详情
 		if m.loading {
 			if key.Matches(msg, m.keys.Quit) {
 				return m, tea.Quit
@@ -729,7 +749,7 @@ func (m *mainModel) loadingView() string {
 	var content string
 	if m.loadingErr != nil {
 		content = strings.Join([]string{
-			titleStyle.Render(m.list.Title),
+			titleStyle.Render("Talea"),
 			"",
 			errorStyle.Render(i18n.Trf("Failed to sync sessions: %v", "同步会话失败：%v", m.loadingErr)),
 			"",
@@ -737,10 +757,12 @@ func (m *mainModel) loadingView() string {
 		}, "\n")
 	} else {
 		content = strings.Join([]string{
-			titleStyle.Render(m.list.Title),
+			titleStyle.Render("Talea"),
 			"",
-			m.spinner.View() + " " +
-				loadingStyle.Render(i18n.Tr("Syncing sessions; may take longer with large data", "正在同步会话，数据量大时可能稍慢")),
+			loadingStagesView(m.loadingStage),
+			"",
+			m.spinner.View() + " " + loadingStyle.Render(loadingStageMessage(m.loadingStage)),
+			loadingDimStyle.Render(i18n.Tr("This may take a moment with a large session history", "数据量较大时可能需要一点时间")),
 			"",
 			loadingDimStyle.Render(i18n.Tr("Press q to quit", "按 q 退出")),
 		}, "\n")
@@ -754,6 +776,44 @@ func (m *mainModel) loadingView() string {
 		return lipgloss.PlaceHorizontal(m.width, lipgloss.Center, content)
 	}
 	return content
+}
+
+func loadingStagesView(current syncer.Stage) string {
+	stages := []syncer.Stage{syncer.StageDetecting, syncer.StageSyncing, syncer.StagePreparing}
+	lines := make([]string, 0, len(stages))
+	for _, stage := range stages {
+		marker, style := "○", loadingDimStyle
+		switch {
+		case stage < current:
+			marker, style = "✓", loadingDoneStyle
+		case stage == current:
+			marker, style = "●", loadingStyle
+		}
+		lines = append(lines, style.Render(marker+" "+loadingStageName(stage)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func loadingStageName(stage syncer.Stage) string {
+	switch stage {
+	case syncer.StageSyncing:
+		return i18n.Tr("Sync session history", "同步会话记录")
+	case syncer.StagePreparing:
+		return i18n.Tr("Prepare session list", "准备会话列表")
+	default:
+		return i18n.Tr("Check local agents", "检查本地 Agent")
+	}
+}
+
+func loadingStageMessage(stage syncer.Stage) string {
+	switch stage {
+	case syncer.StageSyncing:
+		return i18n.Tr("Syncing session history…", "正在同步会话记录…")
+	case syncer.StagePreparing:
+		return i18n.Tr("Preparing session list…", "正在准备会话列表…")
+	default:
+		return i18n.Tr("Checking local agents…", "正在检查本地 Agent…")
+	}
 }
 
 // showDetail 进入详情页。

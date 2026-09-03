@@ -3,6 +3,7 @@ package syncer
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -46,6 +47,29 @@ func TestSyncNoRegistryIsNoop(t *testing.T) {
 	a := &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}
 	if err := Sync(ctx, a, db); err != nil {
 		t.Fatalf("Sync on empty registry: %v", err)
+	}
+}
+
+func TestSyncWithProgressReportsStagesInOrder(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	a := &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}
+	var got []Stage
+	if err := SyncWithProgress(ctx, a, db, func(stage Stage) {
+		got = append(got, stage)
+	}); err != nil {
+		t.Fatalf("SyncWithProgress: %v", err)
+	}
+	want := []Stage{StageDetecting, StageSyncing, StagePreparing}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("progress stages = %v, want %v", got, want)
 	}
 }
 

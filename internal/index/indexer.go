@@ -17,10 +17,23 @@ type Indexer struct {
 	DB    *DB
 	Force bool // 全量重建（忽略增量跳过）
 
+	// Progress 在索引阶段切换时通知调用方。为空时不发送通知。
+	Progress func(ProgressStage)
+
 	// Instances 可选：注入固定的 Agent 实例列表（测试用）。
 	// 为空时通过 App.DetectInstances 探测。
 	Instances []model.AgentInstance
 }
+
+// ProgressStage 表示索引器对外暴露的粗粒度阶段。
+type ProgressStage uint8
+
+const (
+	// ProgressDetecting 表示正在探测本地 Agent。
+	ProgressDetecting ProgressStage = iota
+	// ProgressIndexing 表示正在发现、解析并写入会话。
+	ProgressIndexing
+)
 
 // Result 是单 Agent 的索引结果。
 type Result struct {
@@ -34,6 +47,7 @@ type Result struct {
 
 // Run 执行索引，返回按 Agent 汇总的结果。
 func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
+	ix.reportProgress(ProgressDetecting)
 	tracked, err := ix.DB.LoadTracked(ctx)
 	if err != nil {
 		return nil, err
@@ -45,6 +59,7 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 	if len(ix.Instances) > 0 {
 		insts = ix.Instances
 	}
+	ix.reportProgress(ProgressIndexing)
 
 	var out []Result
 	for _, inst := range insts {
@@ -124,6 +139,12 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 		out = append(out, res)
 	}
 	return out, nil
+}
+
+func (ix *Indexer) reportProgress(stage ProgressStage) {
+	if ix.Progress != nil {
+		ix.Progress(stage)
+	}
 }
 
 // indexTimelineEvents 索引会话的时间线事件（单事务批量写入）。

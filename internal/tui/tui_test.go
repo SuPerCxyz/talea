@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,9 +17,11 @@ import (
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
 	"github.com/talea/talea/internal/config"
+	"github.com/talea/talea/internal/i18n"
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/search"
+	"github.com/talea/talea/internal/syncer"
 	"github.com/talea/talea/internal/timeline"
 )
 
@@ -109,8 +112,8 @@ func TestLoadTuiSessionsAgentFilter(t *testing.T) {
 	}
 	now := time.Now()
 	sessions := []*model.Session{
-		mkTuiSession("ses_1", "/home/user/nexora"),                       // opencode
-		mkTuiSession("ses_2", "/home/user/nexora/frontend"),              // opencode
+		mkTuiSession("ses_1", "/home/user/nexora"),          // opencode
+		mkTuiSession("ses_2", "/home/user/nexora/frontend"), // opencode
 		{AgentID: model.AgentClaudeCode, SessionID: "ses_3", FirstQuestion: "cc", WorkingDirectory: "/home/user/nexora", StartedAt: &now, EndedAt: &now, LastActivityAt: &now, Activity: model.ActivityInactive, IndexedAt: now, UpdatedAt: now},
 	}
 	for _, s := range sessions {
@@ -512,8 +515,72 @@ func TestLoadingViewRendersSpinner(t *testing.T) {
 	if !strings.Contains(out, "⣾") {
 		t.Errorf("loading view should include a spinner frame, got: %q", out)
 	}
-	if !strings.Contains(out, "正在同步会话") && !strings.Contains(out, "Syncing sessions") {
+	if !strings.Contains(out, "正在检查本地 Agent") && !strings.Contains(out, "Checking local agents") {
 		t.Errorf("loading view should show sync message, got: %q", out)
+	}
+	if strings.Contains(out, "Agent Sessions") {
+		t.Errorf("loading view should not use the list title, got: %q", out)
+	}
+}
+
+func TestLoadingViewShowsCurrentStage(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Default()
+	reg := adapters.NewRegistry()
+	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
+	m := newMain(ctx, a, nil, nil, nil, "", "")
+	m.loading = true
+	m.loadingStage = syncer.StageSyncing
+	out := m.View()
+	for _, want := range []string{"✓ Check local agents", "● Sync session history", "○ Prepare session list", "Syncing session history…"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("loading view missing %q, got: %q", want, out)
+		}
+	}
+}
+
+func TestLoadingViewChineseCopy(t *testing.T) {
+	i18n.Set(i18n.LangZh)
+	t.Cleanup(func() { i18n.Set(i18n.LangEn) })
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, nil, "", "")
+	m.loading = true
+	out := m.View()
+	for _, want := range []string{"检查本地 Agent", "同步会话记录", "准备会话列表", "正在检查本地 Agent…", "数据量较大时可能需要一点时间", "按 q 退出"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Chinese loading view missing %q, got: %q", want, out)
+		}
+	}
+	if strings.Contains(out, "首次") {
+		t.Errorf("loading view should not imply first launch, got: %q", out)
+	}
+}
+
+func TestRunIndexSendsLoadingStages(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	a := &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}
+	m := newMain(ctx, a, nil, nil, db, "", "")
+	var msgs []tea.Msg
+	m.send = func(msg tea.Msg) { msgs = append(msgs, msg) }
+	if _, ok := m.runIndex().(indexedMsg); !ok {
+		t.Fatal("runIndex should return indexedMsg")
+	}
+	var got []syncer.Stage
+	for _, msg := range msgs {
+		if progress, ok := msg.(loadingStageMsg); ok {
+			got = append(got, progress.stage)
+		}
+	}
+	want := []syncer.Stage{syncer.StageDetecting, syncer.StageSyncing, syncer.StagePreparing}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("loading stage messages = %v, want %v", got, want)
 	}
 }
 
@@ -614,7 +681,6 @@ func TestIndexedMsgErrorShowsFeedback(t *testing.T) {
 		t.Errorf("error view should show failure message, got: %q", out)
 	}
 }
-
 
 // TestLoadingViewCentered 验证 loading 视图在设置尺寸后水平且垂直居中。
 func TestLoadingViewCentered(t *testing.T) {
