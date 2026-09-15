@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -36,19 +35,35 @@ var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.AdaptiveColor{Light: "#C2185B", Dark: "#FF9E80"})
+	loadingTitleStyle = titleStyle.Copy()
 	// loadingStyle 用于等待动画中的主文案。
 	loadingStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"})
+			Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"}).
+			Background(lipgloss.AdaptiveColor{Light: "#f3e8ff", Dark: "#5b2a86"}).
+			Padding(0, 1)
 	// loadingDoneStyle 用于已完成的等待阶段。
 	loadingDoneStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#2E7D32", Dark: "#9BE564"})
+				Foreground(lipgloss.AdaptiveColor{Light: "#2E7D32", Dark: "#9BE564"}).
+				Padding(0, 1)
+	loadingPendingStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#9a9a9a"}).
+				Padding(0, 1)
 	errorStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.AdaptiveColor{Light: "#B00020", Dark: "#FF6E6E"})
 	// loadingDimStyle 用于等待视图中的次要文案。
 	loadingDimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#9a9a9a"})
+	footerKeyStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1a1a1a"}).
+			Background(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"}).
+			Padding(0, 1)
+	footerDescStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#e0e0e0"})
+	footerSeparatorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#7e57c2", Dark: "#c5b3e6"})
 )
 
 // newListDelegate 返回高对比度的列表项样式（每项 3 行：agent+usage / 首问 / 最近消息）。
@@ -116,6 +131,8 @@ const (
 	bullet = "•"
 	// pageDot 用于分页圆点；加粗高亮后比默认 • 醒目。
 	pageDot = "•"
+	// loadingCardMaxWidth 限制加载卡片宽度，避免宽屏中文案被拉得过散。
+	loadingCardMaxWidth = 64
 )
 
 // loadTuiSessions 加载 TUI 会话列表，dir 非空时仅保留该目录下的会话，
@@ -299,7 +316,6 @@ type mainModel struct {
 	list         list.Model
 	detail       *detailModel
 	keys         keyMap
-	help         help.Model
 	width        int
 	height       int
 	picked       *model.Session
@@ -322,10 +338,6 @@ type keyMap struct {
 
 func (k keyMap) ShortHelp() []key.Binding {
 	return []key.Binding{k.Enter, k.Detail, k.Open, k.Back, k.Turns, k.Quit}
-}
-
-func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Enter, k.Detail, k.Open, k.Back, k.Turns, k.Quit}}
 }
 
 type item struct {
@@ -381,7 +393,6 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, usages 
 		usages:   usages,
 		list:     l,
 		keys:     km,
-		help:     help.New(),
 		spinner:  sp,
 	}
 }
@@ -558,10 +569,10 @@ func itemDesc(it item) string {
 		first = i18n.Tr("No valid user question detected", "未识别到有效用户提问")
 	}
 	lines := []string{
-		i18n.Tr("Q: ", "问：") + truncRunes(first, 100),
+		i18n.Tr("Q: ", "问：") + first,
 	}
 	if s.LastUserPrompt != "" {
-		lines = append(lines, i18n.Tr("Last: ", "最近：")+truncRunes(firstLine(s.LastUserPrompt), 100))
+		lines = append(lines, i18n.Tr("Last: ", "最近：")+firstLine(s.LastUserPrompt))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -622,10 +633,11 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		h := m.height - 4
+		h := m.listHeight(msg.Height, msg.Width)
 		m.list.SetSize(msg.Width, h)
-		m.help.Width = msg.Width
 		if m.detail != nil {
+			m.detail.width = msg.Width
+			m.detail.height = msg.Height - 2
 			m.detail.view.Width = msg.Width
 			m.detail.view.Height = msg.Height - 2
 			m.detail.contentValid = false
@@ -739,8 +751,108 @@ func (m *mainModel) View() string {
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render(m.list.Title) + "\n\n")
 	sb.WriteString(m.list.View())
-	sb.WriteString("\n" + m.help.View(m.keys))
+	sb.WriteString("\n" + m.keyHelpView())
 	return sb.String()
+}
+
+func (m *mainModel) listHeight(termHeight, termWidth int) int {
+	height := termHeight - 3 - keyHelpLineCount(m.keys.ShortHelp(), termWidth)
+	if height < 1 {
+		return 1
+	}
+	return height
+}
+
+func (m *mainModel) keyHelpView() string {
+	return renderKeyHelp(m.keys.ShortHelp(), m.width)
+}
+
+func keyHelpLineCount(bindings []key.Binding, width int) int {
+	view := renderKeyHelp(bindings, width)
+	if view == "" {
+		return 0
+	}
+	return strings.Count(view, "\n") + 1
+}
+
+func renderKeyHelp(bindings []key.Binding, width int) string {
+	separator := "  " + footerSeparatorStyle.Render("•") + "  "
+	separatorWidth := lipgloss.Width(separator)
+	var lines []string
+	var line strings.Builder
+	lineWidth := 0
+	for _, binding := range bindings {
+		if !binding.Enabled() {
+			continue
+		}
+		itemLines := renderKeyHelpItem(binding, width)
+		if len(itemLines) > 1 {
+			if lineWidth > 0 {
+				lines = append(lines, line.String())
+				line.Reset()
+				lineWidth = 0
+			}
+			lines = append(lines, itemLines...)
+			continue
+		}
+		item := itemLines[0]
+		itemWidth := lipgloss.Width(item)
+		if lineWidth > 0 && width > 0 && lineWidth+separatorWidth+itemWidth > width {
+			lines = append(lines, line.String())
+			line.Reset()
+			lineWidth = 0
+		}
+		if lineWidth > 0 {
+			line.WriteString(separator)
+			lineWidth += separatorWidth
+		}
+		line.WriteString(item)
+		lineWidth += itemWidth
+	}
+	if lineWidth > 0 {
+		lines = append(lines, line.String())
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderKeyHelpItem(binding key.Binding, width int) []string {
+	info := binding.Help()
+	keyText := footerKeyStyle.Render("[" + info.Key + "]")
+	if width > 0 && lipgloss.Width(keyText) > width {
+		keyText = footerKeyStyle.Copy().Padding(0).Render(info.Key)
+	}
+	item := keyText + " " + footerDescStyle.Render(info.Desc)
+	if width <= 0 || lipgloss.Width(item) <= width {
+		return []string{item}
+	}
+	lines := []string{keyText}
+	for _, text := range wrapKeyHelpText(info.Desc, width) {
+		lines = append(lines, footerDescStyle.Render(text))
+	}
+	return lines
+}
+
+func wrapKeyHelpText(text string, width int) []string {
+	if width <= 0 || runewidth.StringWidth(text) <= width {
+		return []string{text}
+	}
+	var lines []string
+	var line []rune
+	lineWidth := 0
+	for _, r := range text {
+		runeWidth := runewidth.RuneWidth(r)
+		if lineWidth > 0 && lineWidth+runeWidth > width {
+			lines = append(lines, string(line))
+			line = nil
+			lineWidth = 0
+		}
+		line = append(line, r)
+		lineWidth += runeWidth
+	}
+	if len(line) > 0 {
+		lines = append(lines, string(line))
+	}
+	return lines
 }
 
 // loadingView 渲染首屏等待动画或同步失败提示。
@@ -749,7 +861,7 @@ func (m *mainModel) loadingView() string {
 	var content string
 	if m.loadingErr != nil {
 		content = strings.Join([]string{
-			titleStyle.Render("Talea"),
+			loadingTitle(m.width),
 			"",
 			errorStyle.Render(i18n.Trf("Failed to sync sessions: %v", "同步会话失败：%v", m.loadingErr)),
 			"",
@@ -757,7 +869,7 @@ func (m *mainModel) loadingView() string {
 		}, "\n")
 	} else {
 		content = strings.Join([]string{
-			titleStyle.Render("Talea"),
+			loadingTitle(m.width),
 			"",
 			loadingStagesView(m.loadingStage),
 			"",
@@ -767,6 +879,7 @@ func (m *mainModel) loadingView() string {
 			loadingDimStyle.Render(i18n.Tr("Press q to quit", "按 q 退出")),
 		}, "\n")
 	}
+	content = loadingCard(m.width, content)
 	if m.width > 0 && m.height > 0 {
 		// 水平 + 垂直居中
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
@@ -778,11 +891,52 @@ func (m *mainModel) loadingView() string {
 	return content
 }
 
+// loadingCard 为加载内容提供受控宽度、边框和留白；终端字号由用户配置决定。
+func loadingCard(termWidth int, content string) string {
+	cardWidth := loadingCardWidth(termWidth)
+	contentWidth := cardWidth - 2 // 左右边框各 1；内边距包含在内容宽度内
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	style := lipgloss.NewStyle().
+		Width(contentWidth).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.AdaptiveColor{Light: "#7e57c2", Dark: "#ffd166"}).
+		Padding(1, 2)
+	return style.Render(content)
+}
+
+func loadingCardWidth(termWidth int) int {
+	cardWidth := loadingCardMaxWidth
+	if termWidth > 0 && termWidth-4 < cardWidth {
+		cardWidth = termWidth - 4
+	}
+	if cardWidth < 8 {
+		cardWidth = 8
+	}
+	return cardWidth
+}
+
+func loadingTitle(termWidth int) string {
+	return loadingTitleStyle.
+		Width(loadingCardTextWidth(termWidth)).
+		Align(lipgloss.Center).
+		Render("Talea")
+}
+
+func loadingCardTextWidth(termWidth int) int {
+	width := loadingCardWidth(termWidth) - 6
+	if width < 1 {
+		return 1
+	}
+	return width
+}
+
 func loadingStagesView(current syncer.Stage) string {
 	stages := []syncer.Stage{syncer.StageDetecting, syncer.StageSyncing, syncer.StagePreparing}
 	lines := make([]string, 0, len(stages))
 	for _, stage := range stages {
-		marker, style := "○", loadingDimStyle
+		marker, style := "○", loadingPendingStyle
 		switch {
 		case stage < current:
 			marker, style = "✓", loadingDoneStyle

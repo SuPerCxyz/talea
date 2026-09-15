@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/talea/talea/internal/adapters"
@@ -177,6 +178,49 @@ func TestSessionTitleAndDesc(t *testing.T) {
 	}
 }
 
+func TestSessionDescriptionUsesViewportWidth(t *testing.T) {
+	longQuestion := strings.Repeat("question-", 20)
+	s := mkTuiSession("wide", "/home/user/nexora")
+	s.FirstQuestion = longQuestion
+	s.LastUserPrompt = strings.Repeat("最近消息-", 20)
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, []*model.Session{s}, nil, nil, "", "")
+
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 240, Height: 16})
+	m = nm.(*mainModel)
+	wide := m.list.View()
+	if !strings.Contains(wide, longQuestion) {
+		t.Fatalf("wide list should keep more than 100 characters of question, got %q", wide)
+	}
+
+	nm, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: 16})
+	m = nm.(*mainModel)
+	narrow := m.list.View()
+	assertLinesFit(t, narrow, 40)
+	if strings.Contains(narrow, longQuestion) {
+		t.Fatal("narrow list should clip the long question")
+	}
+
+	s.FirstQuestion = strings.Repeat("中文问题", 30)
+	m.list.SetItems(itemsOf([]*model.Session{s}, nil))
+	chinese := m.list.View()
+	assertLinesFit(t, chinese, 40)
+}
+
+func TestSessionListResizePreservesSelection(t *testing.T) {
+	first := mkTuiSession("first", "/home/user/one")
+	second := mkTuiSession("second", "/home/user/two")
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, []*model.Session{first, second}, nil, nil, "", "")
+	m.list.SetSize(240, 12)
+	m.list.Select(1)
+
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 16})
+	mm := nm.(*mainModel)
+	selected, ok := mm.list.SelectedItem().(item)
+	if !ok || selected.sess.SessionID != "second" {
+		t.Fatalf("resize changed selection: got %#v", mm.list.SelectedItem())
+	}
+}
+
 func TestItemFilterValue(t *testing.T) {
 	it := item{title: "t", sess: &model.Session{
 		FirstQuestion: "q", SessionID: "s", AgentID: model.AgentOpenCode,
@@ -287,6 +331,84 @@ func TestDetailRenderEmptyDB(t *testing.T) {
 	// 无 db/app 时聚合 render 不崩溃
 	if d.render() == "" {
 		t.Fatal("empty render")
+	}
+}
+
+func TestDetailTablesUseViewportWidth(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	sess := mkTuiSession("session", "/home/user/nexora")
+	sess.AgentInstanceID = "instance"
+	if err := db.UpsertSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+	longModel := strings.Repeat("model-", 8)
+	longPrompt := strings.Repeat("prompt-", 9)
+	total := int64(1000)
+	events := []*model.UsageTimelineEvent{
+		{AgentInstanceID: "instance", SessionID: "session", EventType: model.UsageEventUserMessage,
+			Timestamp: &now, Sequence: 1, UserPromptPreview: longPrompt, SourceIdentity: "user-1"},
+		{AgentInstanceID: "instance", SessionID: "session", EventType: model.UsageEventRequest,
+			Timestamp: &now, Sequence: 2, Model: longModel, TotalTokens: &total, SourceIdentity: "request-1"},
+	}
+	if _, err := db.UpsertTimelineEvents(ctx, events); err != nil {
+		t.Fatal(err)
+	}
+	child := mkTuiSession("child", "/home/user/nexora")
+	child.AgentInstanceID = "instance"
+	child.ParentSessionID = sess.SessionID
+	child.FirstQuestion = longPrompt
+	if err := db.UpsertSession(ctx, child); err != nil {
+		t.Fatal(err)
+	}
+
+	d := &detailModel{ctx: ctx, db: db, sess: sess, width: 100}
+	modelWide := d.renderModel()
+	assertLinesFit(t, modelWide, 100)
+	if !strings.Contains(modelWide, longModel) {
+		t.Fatalf("wide model table should show full model name, got %q", modelWide)
+	}
+	turnsWide := d.renderTurnsTable()
+	assertLinesFit(t, turnsWide, 100)
+	if !strings.Contains(turnsWide, longPrompt) {
+		t.Fatalf("wide turns table should show full prompt, got %q", turnsWide)
+	}
+	subagentsWide := d.renderSubagents()
+	assertLinesFit(t, subagentsWide, 100)
+	if !strings.Contains(subagentsWide, longPrompt) {
+		t.Fatalf("wide sub-agent table should show full prompt, got %q", subagentsWide)
+	}
+
+	d.width = 40
+	assertLinesFit(t, d.renderModel(), 40)
+	assertLinesFit(t, d.renderTurnsTable(), 40)
+	assertLinesFit(t, d.renderSubagents(), 40)
+
+	m := newMain(ctx, &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, db, "", "")
+	m.detail = d
+	d.contentValid = true
+	_, _ = m.Update(tea.WindowSizeMsg{Width: 32, Height: 16})
+	if d.width != 32 || d.height != 14 || d.contentValid {
+		t.Fatalf("detail resize state not updated: width=%d height=%d valid=%v", d.width, d.height, d.contentValid)
+	}
+	assertLinesFit(t, d.renderModel(), 32)
+}
+
+func assertLinesFit(t *testing.T, output string, width int) {
+	t.Helper()
+	for i, line := range strings.Split(output, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Errorf("line %d exceeds width %d: got %d, line=%q", i+1, width, got, line)
+		}
 	}
 }
 
@@ -701,5 +823,162 @@ func TestLoadingViewCentered(t *testing.T) {
 	first := out[:strings.Index(out, "\n")]
 	if !strings.HasPrefix(first, " ") {
 		t.Errorf("loading view should be horizontally centered, first line starts without padding: %q", first)
+	}
+}
+
+func TestLoadingCardResponsiveWidth(t *testing.T) {
+	wide := loadingCard(120, "Talea\nSync session history")
+	if !strings.Contains(wide, "╭") || !strings.Contains(wide, "╰") {
+		t.Fatalf("loading card should render rounded borders, got %q", wide)
+	}
+	assertLinesFit(t, wide, loadingCardMaxWidth)
+	if got := lipgloss.Width(strings.Split(wide, "\n")[0]); got != loadingCardMaxWidth {
+		t.Fatalf("wide card width = %d, want %d", got, loadingCardMaxWidth)
+	}
+
+	narrow := loadingCard(40, "Talea\nSync session history")
+	assertLinesFit(t, narrow, 40)
+	if got := lipgloss.Width(strings.Split(narrow, "\n")[0]); got >= loadingCardMaxWidth {
+		t.Fatalf("narrow card should shrink, got width %d", got)
+	}
+}
+
+func TestLoadingViewUsesResponsiveCard(t *testing.T) {
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, nil, "", "")
+	m.loading = true
+	m.width = 40
+	m.height = 20
+	out := m.loadingView()
+	assertLinesFit(t, out, 40)
+	if !strings.Contains(out, "╭") {
+		t.Fatalf("loading view should include the card border, got %q", out)
+	}
+	if !loadingStyle.GetBold() || loadingStyle.GetBackground() == nil {
+		t.Fatal("active loading style should use bold text and a background")
+	}
+}
+
+func TestLoadingTitleCenteredAndProminent(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		width int
+		err   bool
+	}{
+		{name: "normal", width: 32},
+		{name: "narrow", width: 32},
+		{name: "failure", width: 32, err: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, nil, "", "")
+			m.loading = !tc.err
+			m.loadingErr = nil
+			if tc.err {
+				m.loadingErr = errors.New("boom")
+			}
+			m.width = tc.width
+			m.height = 20
+			assertLoadingTitleCentered(t, m.loadingView(), tc.width)
+		})
+	}
+	if !loadingTitleStyle.GetBold() || loadingTitleStyle.GetUnderline() {
+		t.Fatal("loading title should be bold without an underline")
+	}
+}
+
+func assertLoadingTitleCentered(t *testing.T, output string, width int) {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		idx := strings.Index(line, "Talea")
+		if idx < 0 {
+			continue
+		}
+		center := lipgloss.Width(line[:idx]) + lipgloss.Width("Talea")/2
+		delta := center - width/2
+		if delta < -1 || delta > 1 {
+			t.Fatalf("Talea center=%d, want near %d, line=%q", center, width/2, line)
+		}
+		return
+	}
+	t.Fatalf("loading title not found in %q", output)
+}
+
+func TestLoadingTitleIsCleanAndResponsive(t *testing.T) {
+	for _, width := range []int{32, 100} {
+		title := loadingTitle(width)
+		if !strings.Contains(title, "Talea") {
+			t.Fatalf("title at width %d should contain Talea, got %q", width, title)
+		}
+		if strings.Contains(title, "█") || strings.Contains(title, "\n") {
+			t.Fatalf("title at width %d should not use block bars or multiple lines, got %q", width, title)
+		}
+		assertLinesFit(t, title, loadingCardTextWidth(width))
+	}
+}
+
+func TestKeyboardHelpIsCompleteAndResponsive(t *testing.T) {
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, nil, "", "")
+	want := []string{
+		"[enter]", "open session",
+		"[d]", "details",
+		"[o]", "resume session",
+		"[esc]", "back",
+		"[t]", "user turns",
+		"[q]", "quit",
+	}
+
+	wide := renderKeyHelp(m.keys.ShortHelp(), 120)
+	if strings.Contains(wide, "\n") {
+		t.Fatalf("wide keyboard help should fit on one line, got %q", wide)
+	}
+	for _, text := range want {
+		if !strings.Contains(wide, text) {
+			t.Errorf("wide keyboard help missing %q, got %q", text, wide)
+		}
+	}
+
+	narrow := renderKeyHelp(m.keys.ShortHelp(), 44)
+	if !strings.Contains(narrow, "\n") {
+		t.Fatalf("narrow keyboard help should wrap, got %q", narrow)
+	}
+	for _, text := range want {
+		if !strings.Contains(narrow, text) {
+			t.Errorf("narrow keyboard help missing %q, got %q", text, narrow)
+		}
+	}
+	assertLinesFit(t, narrow, 44)
+
+	veryNarrow := renderKeyHelp(m.keys.ShortHelp(), 20)
+	for _, text := range want {
+		if !strings.Contains(veryNarrow, text) {
+			t.Errorf("very narrow keyboard help missing %q, got %q", text, veryNarrow)
+		}
+	}
+	assertLinesFit(t, veryNarrow, 20)
+}
+
+func TestListHeightAccountsForKeyboardHelp(t *testing.T) {
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, nil, "", "")
+	width, height := 44, 20
+	rows := keyHelpLineCount(m.keys.ShortHelp(), width)
+	if rows < 2 {
+		t.Fatalf("narrow keyboard help should use multiple rows, got %d", rows)
+	}
+	if got, want := m.listHeight(height, width), height-3-rows; got != want {
+		t.Fatalf("list height = %d, want %d", got, want)
+	}
+}
+
+func TestMainViewUsesResponsiveKeyboardHelp(t *testing.T) {
+	const width, height = 44, 20
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, nil, "", "")
+	m.width = width
+	m.height = height
+	m.list.SetSize(width, m.listHeight(height, width))
+	out := m.View()
+	assertLinesFit(t, out, width)
+	for _, text := range []string{"[enter]", "open session", "[q]", "quit"} {
+		if !strings.Contains(out, text) {
+			t.Errorf("main view missing keyboard hint %q, got %q", text, out)
+		}
 	}
 }

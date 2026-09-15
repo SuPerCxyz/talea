@@ -41,8 +41,8 @@ type detailModel struct {
 
 	// 用户轮次默认折叠，按 t 展开
 	turnsVisible bool
-	turnsCount  int
-	turnsLoaded bool
+	turnsCount   int
+	turnsLoaded  bool
 
 	// 渲染缓存：避免每次 View() 重复查询 DB
 	cachedContent string
@@ -158,36 +158,26 @@ func (d *detailModel) renderModel() string {
 	if len(sums) == 0 {
 		return i18n.Tr("This session has no model data", "该会话没有模型数据")
 	}
-	// 固定列宽：模型列 30（超长截断），数值列 6（容纳 999.9K），间隔 4
-	const (
-		modelW = 30
-		numW   = 6
-		gap    = 4
-	)
+	widths, gap := fitColumns(d.width, 4, 0, 30, 6, 6, 6, 6)
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render(i18n.Tr("Models Summary", "按模型汇总")) + "\n\n")
-	sep := strings.Repeat(" ", gap)
 	cells := []string{
-		padRight(i18n.Tr("Model", "模型"), modelW),
-		padRight(i18n.Tr("Req", "请求"), numW),
-		padRight(i18n.Tr("Input", "输入"), numW),
-		padRight(i18n.Tr("Output", "输出"), numW),
-		padRight(i18n.Tr("Total", "总计"), numW),
+		tableCell(i18n.Tr("Model", "模型"), widths[0]),
+		tableCell(i18n.Tr("Req", "请求"), widths[1]),
+		tableCell(i18n.Tr("Input", "输入"), widths[2]),
+		tableCell(i18n.Tr("Output", "输出"), widths[3]),
+		tableCell(i18n.Tr("Total", "总计"), widths[4]),
 	}
-	sb.WriteString(strings.Join(cells, sep) + "\n")
+	sb.WriteString(joinTableCells(cells, gap) + "\n")
 	for _, m := range sums {
-		model := m.Model
-		if runewidth.StringWidth(model) > modelW {
-			model = truncWidth(model, modelW-1) + "…"
-		}
 		cells := []string{
-			padRight(model, modelW),
-			padRight(fmt.Sprintf("%d", m.Requests), numW),
-			padRight(humanNum(m.InputTokens), numW),
-			padRight(humanNum(m.OutputTokens), numW),
-			padRight(humanNum(m.TotalTokens), numW),
+			tableCell(m.Model, widths[0]),
+			tableCell(fmt.Sprintf("%d", m.Requests), widths[1]),
+			tableCell(humanNum(m.InputTokens), widths[2]),
+			tableCell(humanNum(m.OutputTokens), widths[3]),
+			tableCell(humanNum(m.TotalTokens), widths[4]),
 		}
-		sb.WriteString(strings.Join(cells, sep) + "\n")
+		sb.WriteString(joinTableCells(cells, gap) + "\n")
 	}
 	return sb.String()
 }
@@ -204,13 +194,21 @@ func (d *detailModel) renderTurnsTable() string {
 	if len(turns) == 0 {
 		return i18n.Tr("This session has no aggregable turns", "该会话没有可聚合的轮次") + "\n"
 	}
+	widths, gap := fitColumns(d.width, 2, 1, 5, 40, 6, 10)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%-5s  %-40s  %-6s  %-10s\n",
-		i18n.Tr("Turn", "轮次"), i18n.Tr("Question", "提问"),
-		i18n.Tr("Req", "请求"), i18n.Tr("Token", "Token")))
+	sb.WriteString(joinTableCells([]string{
+		tableCell(i18n.Tr("Turn", "轮次"), widths[0]),
+		tableCell(i18n.Tr("Question", "提问"), widths[1]),
+		tableCell(i18n.Tr("Req", "请求"), widths[2]),
+		tableCell(i18n.Tr("Token", "Token"), widths[3]),
+	}, gap) + "\n")
 	for _, t := range turns {
-		sb.WriteString(fmt.Sprintf("%-5d  %-40s  %-6d  %-10s\n",
-			t.Index, truncRunes(t.Prompt, 38), t.Requests, humanNum(t.Total)))
+		sb.WriteString(joinTableCells([]string{
+			tableCell(fmt.Sprintf("%d", t.Index), widths[0]),
+			tableCell(firstLine(t.Prompt), widths[1]),
+			tableCell(fmt.Sprintf("%d", t.Requests), widths[2]),
+			tableCell(humanNum(t.Total), widths[3]),
+		}, gap) + "\n")
 	}
 	return sb.String()
 }
@@ -296,6 +294,7 @@ func (d *detailModel) renderSubagents() string {
 	defer rows.Close()
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render(i18n.Tr("Sub-Agent Sessions", "子 Agent 会话")) + "\n\n")
+	widths, gap := fitColumns(d.width, 2, 2, 11, 20, 40)
 	found := false
 	for rows.Next() {
 		var (
@@ -311,7 +310,11 @@ func (d *detailModel) renderSubagents() string {
 		if started != nil {
 			ts = time.Unix(*started, 0).Format("01-02 15:04")
 		}
-		sb.WriteString(fmt.Sprintf("%s  %s  %s\n", ts, truncRunes(sid, 20), truncRunes(firstLine(fq), 40)))
+		sb.WriteString(joinTableCells([]string{
+			tableCell(ts, widths[0]),
+			tableCell(sid, widths[1]),
+			tableCell(firstLine(fq), widths[2]),
+		}, gap) + "\n")
 		_ = hasUsage
 	}
 	if err := rows.Err(); err != nil && !found {
@@ -321,14 +324,6 @@ func (d *detailModel) renderSubagents() string {
 		sb.WriteString(i18n.Tr("This session has no sub-agent sessions", "该会话没有子 Agent 会话") + "\n")
 	}
 	return sb.String()
-}
-
-func truncRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
 }
 
 // truncWidth 按显示宽度截断字符串（保留前 n 列，不含省略号）。
@@ -347,6 +342,82 @@ func truncWidth(s string, n int) string {
 		w += rw
 	}
 	return string(out)
+}
+
+// fitColumns 根据总宽度压缩列间距和列宽，并把剩余空间分配给可变列。
+func fitColumns(width, gap, flex int, defaults ...int) ([]int, int) {
+	widths := append([]int(nil), defaults...)
+	if len(widths) == 0 || flex < 0 || flex >= len(widths) {
+		return widths, 0
+	}
+	if width <= 0 {
+		width = columnTotal(widths, gap)
+	}
+	total := columnTotal(widths, gap)
+	if width >= total {
+		widths[flex] += width - total
+		return widths, gap
+	}
+	for gap > 0 && total > width {
+		gap--
+		total = columnTotal(widths, gap)
+	}
+	for widths[flex] > 1 && total > width {
+		widths[flex]--
+		total--
+	}
+	for i := range widths {
+		if i == flex {
+			continue
+		}
+		for widths[i] > 1 && total > width {
+			widths[i]--
+			total--
+		}
+	}
+	if total > width {
+		for i := range widths {
+			widths[i] = 0
+		}
+		for i := 0; i < width && i < len(widths); i++ {
+			widths[i] = 1
+		}
+		gap = 0
+	}
+	return widths, gap
+}
+
+func columnTotal(widths []int, gap int) int {
+	total := 0
+	for _, width := range widths {
+		total += width
+	}
+	if len(widths) > 1 {
+		total += gap * (len(widths) - 1)
+	}
+	return total
+}
+
+// tableCell 按显示宽度截断并补齐一个表格单元格。
+func tableCell(s string, width int) string {
+	return padRight(fitCell(s, width), width)
+}
+
+func fitCell(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	return truncWidth(s, width-1) + "…"
+}
+
+func joinTableCells(cells []string, gap int) string {
+	return strings.Join(cells, strings.Repeat(" ", gap))
 }
 
 // padRight 左对齐并补齐到指定显示宽度（按显示宽度计算，兼容中文）。
