@@ -110,7 +110,7 @@ func (db *DB) UpsertMany(ctx context.Context, sessions []*model.Session) (Increm
 
 // txIndex 是事务内索引写入的薄封装。
 type txIndex struct {
-	tx      *sql.Tx
+	tx       *sql.Tx
 	existing map[string]bool
 }
 

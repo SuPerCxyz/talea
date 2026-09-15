@@ -113,13 +113,13 @@ func nn(v sql.NullInt64) *int64 {
 
 // SessionUsageRow 是列表展示所需的会话 Token 汇总。
 type SessionUsageRow struct {
-	InputTokens   *int64
-	OutputTokens  *int64
-	TotalTokens   *int64
-	CacheRead     *int64
-	CacheWrite    *int64
-	Reasoning     *int64
-	RequestCount  *int64
+	InputTokens  *int64
+	OutputTokens *int64
+	TotalTokens  *int64
+	CacheRead    *int64
+	CacheWrite   *int64
+	Reasoning    *int64
+	RequestCount *int64
 }
 
 // UsageBySession 批量查询多个会话的 Token 汇总（含缓存字段）。
@@ -153,7 +153,7 @@ func UsageBySession(ctx context.Context, db *index.DB, keys [][2]string) (map[st
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			iid, sid                      string
+			iid, sid                     string
 			in, ot, tot, cr, cw, re, req sql.NullInt64
 		)
 		if err := rows.Scan(&iid, &sid, &in, &ot, &tot, &cr, &cw, &re, &req); err != nil {

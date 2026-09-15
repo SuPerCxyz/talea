@@ -35,7 +35,7 @@ var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.AdaptiveColor{Light: "#C2185B", Dark: "#FF9E80"})
-	loadingTitleStyle = titleStyle.Copy()
+	loadingTitleStyle = titleStyle
 	// loadingStyle 用于等待动画中的主文案。
 	loadingStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -819,7 +819,7 @@ func renderKeyHelpItem(binding key.Binding, width int) []string {
 	info := binding.Help()
 	keyText := footerKeyStyle.Render("[" + info.Key + "]")
 	if width > 0 && lipgloss.Width(keyText) > width {
-		keyText = footerKeyStyle.Copy().Padding(0).Render(info.Key)
+		keyText = footerKeyStyle.Padding(0).Render(info.Key)
 	}
 	item := keyText + " " + footerDescStyle.Render(info.Desc)
 	if width <= 0 || lipgloss.Width(item) <= width {

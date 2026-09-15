@@ -9,9 +9,9 @@ import (
 
 // 错误哨兵，供上层映射退出码。
 var (
-	ErrAgentRequired   = errors.New("agent name is required")
-	ErrAgentAmbiguous  = errors.New("agent name is ambiguous")
-	ErrAgentUnknown    = errors.New("unknown agent")
+	ErrAgentRequired  = errors.New("agent name is required")
+	ErrAgentAmbiguous = errors.New("agent name is ambiguous")
+	ErrAgentUnknown   = errors.New("unknown agent")
 )
 
 // ResolveAgent 将用户输入的 agent 名称解析为注册表中的 AgentID。

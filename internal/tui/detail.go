@@ -715,19 +715,6 @@ func humanNum(n int64) string {
 	}
 }
 
-func humanDur(d time.Duration) string {
-	total := int64(d / time.Second)
-	if total < 60 {
-		return i18n.Trf("%ds", "%ds", total)
-	}
-	h := total / 3600
-	m := (total % 3600) / 60
-	if h > 0 {
-		return i18n.Trf("%dh%dm", "%d小时%d分", h, m)
-	}
-	return i18n.Trf("%dm", "%d分", m)
-}
-
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		return s[:i]

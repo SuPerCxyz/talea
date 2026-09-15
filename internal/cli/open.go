@@ -172,13 +172,6 @@ func displayNameOf(ad adapters.Adapter) string {
 	return ad.Info().DisplayName
 }
 
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
-}
-
 func dirExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
