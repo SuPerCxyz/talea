@@ -27,13 +27,13 @@ func insertUserEvent(t *testing.T, db *index.DB, iid, sid, preview string, ts in
 	t.Helper()
 	ctx := context.Background()
 	ev := &model.UsageTimelineEvent{
-		AgentInstanceID:  iid,
-		SessionID:        sid,
-		EventType:        model.UsageEventUserMessage,
-		Timestamp:        timep(time.Unix(ts, 0)),
-		Sequence:         seq,
+		AgentInstanceID:   iid,
+		SessionID:         sid,
+		EventType:         model.UsageEventUserMessage,
+		Timestamp:         timep(time.Unix(ts, 0)),
+		Sequence:          seq,
 		UserPromptPreview: preview,
-		SourceIdentity:   fmt.Sprintf("u-%s-%d", iid, ts), // 每条消息唯一，避免 UNIQUE 冲突
+		SourceIdentity:    fmt.Sprintf("u-%s-%d", iid, ts), // 每条消息唯一，避免 UNIQUE 冲突
 	}
 	if _, err := db.UpsertTimelineEvents(ctx, []*model.UsageTimelineEvent{ev}); err != nil {
 		t.Fatal(err)
