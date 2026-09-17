@@ -134,6 +134,8 @@ type Session struct {
 
 	ResumeProgram string   `json:"resume_program"`
 	ResumeArgs    []string `json:"resume_args"`
+	// ResumeLaunchArgs 是适配器验证后的额外恢复参数，不含程序和会话 ID。
+	ResumeLaunchArgs []string `json:"resume_launch_args,omitempty"`
 
 	IndexedAt time.Time `json:"indexed_at"`
 	UpdatedAt time.Time `json:"updated_at"`

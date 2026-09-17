@@ -149,7 +149,6 @@ func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir, agent s
 	for i := range results {
 		sessions = append(sessions, &results[i].Session)
 	}
-	a.ResolveWorkingDirs(ctx, sessions)
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return endTs(sessions[i]) > endTs(sessions[j])
 	})
@@ -254,9 +253,11 @@ func Run(ctx context.Context, dir, agent string) error {
 	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
-	// 进入 TUI 后台同步：先显示等待动画，同步完成后加载最新列表。
-	m := newMain(ctx, a, nil, nil, db, dir, agent)
-	m.loading = true
+	// 先显示已有索引，随后后台同步；没有缓存时才显示等待动画。
+	cached, usages, _ := loadTuiSessions(ctx, a, db, dir, agent)
+	m := newMain(ctx, a, cached, usages, db, dir, agent)
+	m.loading = len(cached) == 0
+	m.syncing = true
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	m.send = p.Send
 	_, err = p.Run()
@@ -321,8 +322,10 @@ type mainModel struct {
 	picked       *model.Session
 	loading      bool  // 启动同步/加载中（显示等待动画）
 	loadingErr   error // 启动同步或列表加载失败
+	syncErr      error // 缓存列表显示后的后台同步失败
 	loadingStage syncer.Stage
 	indexErr     error
+	syncing      bool // 后台同步进行中
 	spinner      spinner.Model
 	send         func(tea.Msg)
 }
@@ -600,7 +603,7 @@ func displayAgent(a model.AgentID) string {
 func (m *mainModel) Init() tea.Cmd {
 	// 启动同步中：启动 spinner 动画并后台同步索引，完成后刷新列表。
 	// 非 loading（测试直接构造已加载列表）时不执行后台同步。
-	if !m.loading {
+	if !m.loading && !m.syncing {
 		return nil
 	}
 	return tea.Batch(m.spinner.Tick, m.runIndex)
@@ -648,24 +651,19 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	case loadingStageMsg:
-		if m.loading {
+		if m.loading || m.syncing {
 			m.loadingStage = msg.stage
 		}
 		return m, nil
 	case indexedMsg:
 		// 启动同步/加载完成，刷新会话列表
 		if m.indexErr != nil {
-			m.loading = false
-			m.loadingErr = m.indexErr
-			return m, nil
-		}
-		if m.detail != nil {
+			m.finishSyncError(m.indexErr)
 			return m, nil
 		}
 		sessions, usages, err := loadTuiSessions(m.ctx, m.app, m.db, m.dir, m.agent)
 		if err != nil {
-			m.loading = false
-			m.loadingErr = err
+			m.finishSyncError(err)
 			return m, nil
 		}
 		sel := ""
@@ -681,6 +679,9 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.loading = false
+		m.loadingErr = nil
+		m.syncErr = nil
+		m.syncing = false
 		return m, nil
 	case tea.KeyMsg:
 		if m.detail != nil {
@@ -719,6 +720,16 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *mainModel) finishSyncError(err error) {
+	if m.loading || len(m.sessions) == 0 {
+		m.loading = false
+		m.loadingErr = err
+	} else {
+		m.syncErr = err
+	}
+	m.syncing = false
+}
+
 func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Quit):
@@ -745,22 +756,39 @@ func (m *mainModel) View() string {
 	if m.detail != nil {
 		return m.detail.View()
 	}
-	if m.loading || m.loadingErr != nil {
+	if m.loading || (m.loadingErr != nil && len(m.sessions) == 0) {
 		return m.loadingView()
 	}
 	var sb strings.Builder
 	sb.WriteString(titleStyle.Render(m.list.Title) + "\n\n")
+	if status := m.syncStatusView(); status != "" {
+		sb.WriteString(status + "\n\n")
+	}
 	sb.WriteString(m.list.View())
 	sb.WriteString("\n" + m.keyHelpView())
 	return sb.String()
 }
 
 func (m *mainModel) listHeight(termHeight, termWidth int) int {
-	height := termHeight - 3 - keyHelpLineCount(m.keys.ShortHelp(), termWidth)
+	statusLines := 0
+	if m.syncing || m.syncErr != nil {
+		statusLines = 1
+	}
+	height := termHeight - 3 - keyHelpLineCount(m.keys.ShortHelp(), termWidth) - statusLines
 	if height < 1 {
 		return 1
 	}
 	return height
+}
+
+func (m *mainModel) syncStatusView() string {
+	if m.syncErr != nil {
+		return errorStyle.Render(i18n.Trf("Showing cached sessions; sync failed: %v", "当前显示缓存会话；后台同步失败：%v", m.syncErr))
+	}
+	if m.syncing {
+		return loadingDimStyle.Render(m.spinner.View() + " " + i18n.Tr("Updating session index…", "正在后台更新会话索引…"))
+	}
+	return ""
 }
 
 func (m *mainModel) keyHelpView() string {

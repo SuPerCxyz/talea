@@ -24,6 +24,7 @@ type IncrementStats struct {
 type TrackedSource struct {
 	AgentInstanceID string
 	SessionID       string
+	SourcePath      string
 	SourceMtime     int64
 	SourceSize      int64
 	SourceOffset    int64
@@ -32,7 +33,7 @@ type TrackedSource struct {
 // LoadTracked 读取数据库中已跟踪的会话来源。
 func (db *DB) LoadTracked(ctx context.Context) (map[string]TrackedSource, error) {
 	rows, err := db.sql.QueryContext(ctx,
-		`SELECT agent_instance_id, session_id, source_mtime, source_size, source_offset
+		`SELECT agent_instance_id, session_id, source_path, source_mtime, source_size, source_offset
 		 FROM sessions`)
 	if err != nil {
 		return nil, err
@@ -41,7 +42,8 @@ func (db *DB) LoadTracked(ctx context.Context) (map[string]TrackedSource, error)
 	out := make(map[string]TrackedSource)
 	for rows.Next() {
 		var t TrackedSource
-		if err := rows.Scan(&t.AgentInstanceID, &t.SessionID, &t.SourceMtime, &t.SourceSize, &t.SourceOffset); err != nil {
+		if err := rows.Scan(&t.AgentInstanceID, &t.SessionID, &t.SourcePath,
+			&t.SourceMtime, &t.SourceSize, &t.SourceOffset); err != nil {
 			continue
 		}
 		key := t.AgentInstanceID + "\x00" + t.SessionID
@@ -128,8 +130,13 @@ func (t *txIndex) upsertSession(ctx context.Context, s *model.Session) (bool, er
 			message_count, user_message_count, tool_call_count,
 			parent_session_id, is_subagent, activity_state,
 			source_path, source_id, source_mtime, source_size, source_offset,
-			has_token_usage, indexed_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			has_token_usage, resume_launch_args_json, indexed_at, updated_at
+		) VALUES (
+			?,?,?,?,?,?,?,?,?,?,
+			?,?,?,?,?,?,?,?,?,?,
+			?,?,?,?,?,?,?,?,?,?,
+			?,?,?,?,?,?
+		)
 		ON CONFLICT(agent_instance_id, session_id) DO UPDATE SET
 			agent_id=excluded.agent_id,
 			format_name=excluded.format_name,
@@ -162,6 +169,8 @@ func (t *txIndex) upsertSession(ctx context.Context, s *model.Session) (bool, er
 			source_size=excluded.source_size,
 			source_offset=excluded.source_offset,
 			has_token_usage=excluded.has_token_usage,
+			resume_launch_args_json=excluded.resume_launch_args_json,
+			fts_dirty=1,
 			updated_at=excluded.updated_at`,
 		s.AgentID, s.AgentInstanceID, s.SessionID, s.FormatName, s.FormatVersion,
 		s.FirstQuestion, s.FirstQuestionSource, s.FirstQuestionConfidence,
@@ -172,7 +181,7 @@ func (t *txIndex) upsertSession(ctx context.Context, s *model.Session) (bool, er
 		s.MessageCount, s.UserMessageCount, s.ToolCallCount,
 		s.ParentSessionID, boolInt(s.IsSubagent), string(s.Activity),
 		s.SourcePath, s.SourceID, s.SourceMtime, s.SourceSize, s.SourceOffset,
-		boolInt(s.HasTokenUsage), time.Now().Unix(), time.Now().Unix())
+		boolInt(s.HasTokenUsage), resumeLaunchArgsJSON(s.ResumeLaunchArgs), time.Now().Unix(), time.Now().Unix())
 	if err != nil {
 		return false, err
 	}

@@ -151,6 +151,70 @@ func TestBuildResumeCommand(t *testing.T) {
 	}
 }
 
+func TestPermissionModeIsRestored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "permission.jsonl")
+	content := "{" + `"type":"permission-mode","permissionMode":"bypassPermissions"` + "}\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New().ParseMetadata(context.Background(),
+		model.AgentInstance{InstanceID: "t", AgentID: model.AgentClaudeCode},
+		adapters.SessionSource{SessionID: "s", Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := New().BuildResumeCommand(*s, "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--permission-mode", "bypassPermissions", "--resume", "s"}
+	if !sameArgs(cmd.Args, want) {
+		t.Fatalf("args=%v want=%v", cmd.Args, want)
+	}
+}
+
+func TestUnknownPermissionModeIsIgnored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "permission.jsonl")
+	content := "{" + `"type":"permission-mode","permissionMode":"unknown"` + "}\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New().ParseMetadata(context.Background(),
+		model.AgentInstance{InstanceID: "t", AgentID: model.AgentClaudeCode},
+		adapters.SessionSource{SessionID: "s", Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.ResumeLaunchArgs) != 0 {
+		t.Fatalf("unknown mode args=%v", s.ResumeLaunchArgs)
+	}
+}
+
+func TestInvalidPersistedPermissionArgsAreIgnored(t *testing.T) {
+	cmd, err := New().BuildResumeCommand(model.Session{
+		SessionID:        "s",
+		ResumeLaunchArgs: []string{"--dangerously-skip-permissions"},
+	}, "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameArgs(cmd.Args, []string{"--resume", "s"}) {
+		t.Fatalf("args=%v", cmd.Args)
+	}
+}
+
+func sameArgs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestInfo(t *testing.T) {
 	info := New().Info()
 	if info.ID != model.AgentClaudeCode {

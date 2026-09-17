@@ -86,6 +86,9 @@ claude --resume <sessionId>
 
 实测 `claude --help` 确认存在 `--resume`。在会话文件所在目录之外使用需先 `cd` 到原 cwd（Talea 负责 chdir）。
 
+会话中的 `permission-mode` 记录会被 Talea 映射为白名单内的
+`--permission-mode <mode>` 恢复参数；未知或缺失模式不添加额外参数。
+
 ## 已知限制 / 未确认项
 
 - `usage` 字段在部分模型/版本下为 0/0，不能作为有效 Token 数据。

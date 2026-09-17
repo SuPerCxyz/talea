@@ -143,12 +143,13 @@ func (a *Adapter) Discover(ctx context.Context, inst model.AgentInstance) ([]ada
 
 // jsonLine 是 JSONL 行的宽松结构。
 type jsonLine struct {
-	Type      string          `json:"type"`
-	Timestamp string          `json:"timestamp"`
-	Cwd       string          `json:"cwd"`
-	SessionID string          `json:"sessionId"`
-	GitBranch string          `json:"gitBranch"`
-	Message   json.RawMessage `json:"message"`
+	Type           string          `json:"type"`
+	Timestamp      string          `json:"timestamp"`
+	Cwd            string          `json:"cwd"`
+	SessionID      string          `json:"sessionId"`
+	GitBranch      string          `json:"gitBranch"`
+	PermissionMode string          `json:"permissionMode"`
+	Message        json.RawMessage `json:"message"`
 }
 
 // ParseMetadata 流式解析单个会话文件元数据。
@@ -186,6 +187,7 @@ func (a *Adapter) ParseMetadata(
 		firstQuestionSet bool
 		lastTs           *time.Time
 		usageSum         = &model.TokenUsage{Source: model.UsageSourceMessageMetadata}
+		permissionMode   string
 	)
 	for {
 		o, ok, err := r.Next()
@@ -211,6 +213,9 @@ func (a *Adapter) ParseMetadata(
 		}
 		if s.GitBranch == "" {
 			s.GitBranch = line.GitBranch
+		}
+		if line.Type == "permission-mode" && validClaudePermissionMode(line.PermissionMode) {
+			permissionMode = line.PermissionMode
 		}
 		switch line.Type {
 		case "user":
@@ -279,6 +284,7 @@ func (a *Adapter) ParseMetadata(
 		s.HasTokenUsage = true
 		s.TokenUsage = usageSum
 	}
+	s.ResumeLaunchArgs = claudeResumeArgs(permissionMode)
 	s.UpdatedAt = time.Now()
 	return s, nil
 }
@@ -481,8 +487,32 @@ func (a *Adapter) BuildResumeCommand(s model.Session, cwd string) (adapters.Comm
 	}
 	return adapters.Command{
 		Program: "claude",
-		Args:    []string{"--resume", s.SessionID},
+		Args: append(claudeResumeArgsFromPersisted(s.ResumeLaunchArgs),
+			"--resume", s.SessionID),
 	}, nil
+}
+
+func validClaudePermissionMode(mode string) bool {
+	switch mode {
+	case "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan":
+		return true
+	default:
+		return false
+	}
+}
+
+func claudeResumeArgs(mode string) []string {
+	if !validClaudePermissionMode(mode) {
+		return nil
+	}
+	return []string{"--permission-mode", mode}
+}
+
+func claudeResumeArgsFromPersisted(args []string) []string {
+	if len(args) != 2 || args[0] != "--permission-mode" || !validClaudePermissionMode(args[1]) {
+		return nil
+	}
+	return append([]string(nil), args...)
 }
 
 // LoadUsage 返回会话 Token 汇总。

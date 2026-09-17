@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	displayName = "OpenCode"
-	formatName  = "opencode-sqlite"
-	dbFileName  = "opencode.db"
+	displayName               = "OpenCode"
+	formatName                = "opencode-sqlite"
+	dbFileName                = "opencode.db"
+	cursorOverlapMillis int64 = 5 * 60 * 1000
 )
 
 // Adapter 实现 OpenCode 会话读取。
@@ -116,29 +117,104 @@ func openRO(path string) (*sql.DB, error) {
 // Discover 发现数据库中的会话。
 func (a *Adapter) Discover(ctx context.Context, inst model.AgentInstance) ([]adapters.SessionSource, error) {
 	dbPath := filepath.Join(inst.DataDirectory, dbFileName)
+	return a.discoverQuery(ctx, dbPath,
+		`SELECT id, time_updated, coalesce(length(title),0) FROM session`)
+}
+
+// DiscoverIncremental 只查询高水位附近可能变化的会话。
+func (a *Adapter) DiscoverIncremental(
+	ctx context.Context,
+	inst model.AgentInstance,
+	state adapters.DiscoveryState,
+) ([]adapters.SessionSource, adapters.DiscoveryState, error) {
+	dbPath := filepath.Join(inst.DataDirectory, dbFileName)
+	if state.Cursor == "" {
+		sources, err := a.Discover(ctx, inst)
+		return sources, adapters.DiscoveryState{Cursor: a.CursorFromSources(inst, sources)}, err
+	}
+	cur, err := decodeCursor(state.Cursor)
+	if err != nil {
+		return nil, adapters.DiscoveryState{}, err
+	}
+	cutoff := cur.TimeUpdated - cursorOverlapMillis
+	sources, err := a.discoverQuery(ctx, dbPath,
+		`SELECT id, time_updated, coalesce(length(title),0)
+		 FROM session WHERE time_updated >= ? ORDER BY time_updated ASC, id ASC`, cutoff)
+	if err != nil {
+		return nil, adapters.DiscoveryState{}, err
+	}
+	next := cur
+	for _, src := range sources {
+		candidate := sourceCursor{TimeUpdated: src.Mtime, SessionID: src.SessionID}
+		if candidate.after(next) {
+			next = candidate
+		}
+	}
+	return sources, adapters.DiscoveryState{Cursor: encodeCursor(next)}, nil
+}
+
+// CursorFromSources 返回来源列表中的最大 (time_updated, session_id)。
+func (a *Adapter) CursorFromSources(_ model.AgentInstance, sources []adapters.SessionSource) string {
+	var max sourceCursor
+	for _, src := range sources {
+		candidate := sourceCursor{TimeUpdated: src.Mtime, SessionID: src.SessionID}
+		if candidate.after(max) {
+			max = candidate
+		}
+	}
+	if max.SessionID == "" {
+		return ""
+	}
+	return encodeCursor(max)
+}
+
+func encodeCursor(c sourceCursor) string {
+	raw, _ := json.Marshal(c)
+	return string(raw)
+}
+
+type sourceCursor struct {
+	TimeUpdated int64  `json:"time_updated"`
+	SessionID   string `json:"session_id"`
+}
+
+func (c sourceCursor) after(other sourceCursor) bool {
+	return c.TimeUpdated > other.TimeUpdated ||
+		(c.TimeUpdated == other.TimeUpdated && c.SessionID > other.SessionID)
+}
+
+func decodeCursor(raw string) (sourceCursor, error) {
+	var c sourceCursor
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		return sourceCursor{}, fmt.Errorf("OpenCode 游标无效: %w", err)
+	}
+	if c.TimeUpdated < 0 || c.SessionID == "" {
+		return sourceCursor{}, fmt.Errorf("OpenCode 游标字段无效")
+	}
+	return c, nil
+}
+
+func (a *Adapter) discoverQuery(ctx context.Context, dbPath, query string, args ...any) ([]adapters.SessionSource, error) {
 	if _, err := os.Stat(dbPath); err != nil {
-		return nil, nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	db, err := openRO(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("只读打开 OpenCode 数据库失败（保留旧索引）: %w", err)
 	}
 	defer db.Close()
-
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, time_updated, coalesce(length(title),0) FROM session`)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var out []adapters.SessionSource
 	for rows.Next() {
-		var (
-			id    string
-			mtime int64
-			size  int64
-		)
+		var id string
+		var mtime, size int64
 		if err := rows.Scan(&id, &mtime, &size); err != nil {
 			continue
 		}
@@ -151,7 +227,7 @@ func (a *Adapter) Discover(ctx context.Context, inst model.AgentInstance) ([]ada
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].SessionID < out[j].SessionID })
-	return out, nil
+	return out, rows.Err()
 }
 
 // sessionRow 对应 session 表。

@@ -101,6 +101,15 @@ codex resume <session-id>
 
 实测 `codex resume --help` 确认：`codex resume [SESSION_ID]` 或 `codex resume --last`。
 
+Talea 会读取会话中的 `turn_context` 权限策略并保存已验证的恢复参数：
+
+- `approval_policy=never` 且 `sandbox_policy.type=danger-full-access`：恢复为
+  `--dangerously-bypass-approvals-and-sandbox`；
+- 单独的已知审批或沙箱策略：恢复为对应的 `--ask-for-approval` / `--sandbox` 参数；
+- 缺失或未知策略：不添加参数，使用默认恢复命令。
+
+原始 `--yolo` 拼写不一定保存在会话中，恢复时使用当前 CLI 的等价规范化参数。
+
 ## 已知限制 / 未确认项
 
 - `history.jsonl` 只记录用户输入，不能作为完整会话来源（仅可辅助）。

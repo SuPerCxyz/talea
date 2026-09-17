@@ -88,6 +88,73 @@ func TestSearchByIDAndFTS(t *testing.T) {
 	}
 }
 
+func TestPopulateUpdatesDirtyFTSRow(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	s := mkSession("dirty-1", "旧问题", "/home/alice", "claude-code")
+	insertSession(t, db, s)
+	if err := Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	s.FirstQuestion = "新问题 multipath"
+	if err := db.UpsertSession(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	need, err := NeedsPopulate(ctx, db)
+	if err != nil || !need {
+		t.Fatalf("dirty FTS state: need=%v err=%v", need, err)
+	}
+	if err := Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	need, err = NeedsPopulate(ctx, db)
+	if err != nil || need {
+		t.Fatalf("clean FTS state: need=%v err=%v", need, err)
+	}
+	results, err := Search(ctx, db, Query{Term: "multipath", Limit: 10})
+	if err != nil || len(results) != 1 || results[0].Session.SessionID != s.SessionID {
+		t.Fatalf("updated search results=%v err=%v", results, err)
+	}
+}
+
+func TestSearchLoadsResumeLaunchArgs(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	s := mkSession("resume-args", "resume args", "/home/alice", "codex-cli")
+	s.ResumeLaunchArgs = []string{"--sandbox", "workspace-write"}
+	insertSession(t, db, s)
+	if err := Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	results, err := Search(ctx, db, Query{Term: "resume args", Limit: 1})
+	if err != nil || len(results) != 1 {
+		t.Fatalf("results=%v err=%v", results, err)
+	}
+	if !sameArgs(results[0].Session.ResumeLaunchArgs, s.ResumeLaunchArgs) {
+		t.Fatalf("resume args=%v want=%v", results[0].Session.ResumeLaunchArgs, s.ResumeLaunchArgs)
+	}
+	if _, err := db.SQL().ExecContext(ctx,
+		`UPDATE sessions SET resume_launch_args_json='not-json' WHERE session_id=?`, s.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	results, err = Search(ctx, db, Query{Term: "resume args", Limit: 1})
+	if err != nil || len(results) != 1 || len(results[0].Session.ResumeLaunchArgs) != 0 {
+		t.Fatalf("invalid stored args should be ignored: results=%v err=%v", results, err)
+	}
+}
+
+func sameArgs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestByIDPrefix 验证按 session_id 前缀查找（不经 FTS，短前缀可用），
 // 以及 agent 过滤与不存在的场景。
 func TestByIDPrefix(t *testing.T) {

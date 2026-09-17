@@ -18,7 +18,7 @@ import (
 )
 
 // SchemaVersion 是当前 schema 版本。
-const SchemaVersion = 1
+const SchemaVersion = 3
 
 // DB 封装 SQLite 索引。
 type DB struct {
@@ -104,11 +104,13 @@ func (db *DB) Migrate(ctx context.Context) error {
 			source_id TEXT,
 			source_mtime INTEGER,
 			source_size INTEGER,
-			source_offset INTEGER NOT NULL DEFAULT 0,
-			has_token_usage INTEGER NOT NULL DEFAULT 0,
-			indexed_at INTEGER NOT NULL,
-			updated_at INTEGER NOT NULL,
-			PRIMARY KEY (agent_instance_id, session_id)
+				source_offset INTEGER NOT NULL DEFAULT 0,
+				has_token_usage INTEGER NOT NULL DEFAULT 0,
+				fts_dirty INTEGER NOT NULL DEFAULT 1,
+				resume_launch_args_json TEXT NOT NULL DEFAULT '[]',
+				indexed_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL,
+				PRIMARY KEY (agent_instance_id, session_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_activity
 			ON sessions (last_activity_at DESC)`,
@@ -188,7 +190,13 @@ func (db *DB) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_usage_timeline_session_time
 			ON usage_timeline_events (agent_instance_id, session_id, timestamp, sequence)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_agent
-			ON sessions (agent_instance_id, last_activity_at DESC)`,
+				ON sessions (agent_instance_id, last_activity_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS source_scan_state (
+				agent_instance_id TEXT PRIMARY KEY,
+				source_fingerprint TEXT NOT NULL,
+				cursor TEXT,
+				updated_at INTEGER NOT NULL
+			)`,
 		`CREATE TABLE IF NOT EXISTS session_meta (
 			agent_instance_id TEXT NOT NULL,
 			session_id TEXT NOT NULL,
@@ -207,6 +215,16 @@ func (db *DB) Migrate(ctx context.Context) error {
 		if _, err := db.sql.ExecContext(ctx, s); err != nil {
 			return fmt.Errorf("迁移执行失败: %w", err)
 		}
+	}
+	if err := ensureColumn(ctx, db.sql, "sessions", "fts_dirty", "INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return fmt.Errorf("迁移 FTS 状态列失败: %w", err)
+	}
+	if err := ensureColumn(ctx, db.sql, "sessions", "resume_launch_args_json", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return fmt.Errorf("迁移恢复参数列失败: %w", err)
+	}
+	if _, err := db.sql.ExecContext(ctx,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_fts_dirty ON sessions (fts_dirty)`); err != nil {
+		return fmt.Errorf("迁移 FTS 状态索引失败: %w", err)
 	}
 	_, err := db.sql.ExecContext(ctx,
 		`INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)
@@ -263,10 +281,15 @@ func (db *DB) InsertIfNew(ctx context.Context, s *model.Session) (bool, error) {
 			working_directory, working_dir_source, working_dir_exists,
 			project_name, git_root, git_branch, git_remote,
 			message_count, user_message_count, tool_call_count,
-			parent_session_id, is_subagent, activity_state,
-			source_path, source_id, source_mtime, source_size, source_offset,
-			has_token_usage, indexed_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				parent_session_id, is_subagent, activity_state,
+				source_path, source_id, source_mtime, source_size, source_offset,
+				has_token_usage, resume_launch_args_json, indexed_at, updated_at
+			) VALUES (
+				?,?,?,?,?,?,?,?,?,?,
+				?,?,?,?,?,?,?,?,?,?,
+				?,?,?,?,?,?,?,?,?,?,
+				?,?,?,?,?,?
+			)`,
 		s.AgentID, s.AgentInstanceID, s.SessionID, s.FormatName, s.FormatVersion,
 		s.FirstQuestion, s.FirstQuestionSource, s.FirstQuestionConfidence,
 		toEpoch(s.StartedAt), toEpoch(s.EndedAt), toEpoch(s.LastActivityAt), durSeconds(s.Duration),
@@ -276,7 +299,7 @@ func (db *DB) InsertIfNew(ctx context.Context, s *model.Session) (bool, error) {
 		s.MessageCount, s.UserMessageCount, s.ToolCallCount,
 		s.ParentSessionID, boolInt(s.IsSubagent), string(s.Activity),
 		s.SourcePath, s.SourceID, s.SourceMtime, s.SourceSize, s.SourceOffset,
-		boolInt(s.HasTokenUsage), time.Now().Unix(), time.Now().Unix())
+		boolInt(s.HasTokenUsage), resumeLaunchArgsJSON(s.ResumeLaunchArgs), time.Now().Unix(), time.Now().Unix())
 	if err != nil {
 		return false, err
 	}
@@ -297,8 +320,13 @@ func (db *DB) UpsertSession(ctx context.Context, s *model.Session) error {
 			message_count, user_message_count, tool_call_count,
 			parent_session_id, is_subagent, activity_state,
 			source_path, source_id, source_mtime, source_size, source_offset,
-			has_token_usage, indexed_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			has_token_usage, resume_launch_args_json, indexed_at, updated_at
+		) VALUES (
+			?,?,?,?,?,?,?,?,?,?,
+			?,?,?,?,?,?,?,?,?,?,
+			?,?,?,?,?,?,?,?,?,?,
+			?,?,?,?,?,?
+		)
 		ON CONFLICT(agent_instance_id, session_id) DO UPDATE SET
 			agent_id=excluded.agent_id,
 			format_name=excluded.format_name,
@@ -331,6 +359,8 @@ func (db *DB) UpsertSession(ctx context.Context, s *model.Session) error {
 			source_size=excluded.source_size,
 			source_offset=excluded.source_offset,
 			has_token_usage=excluded.has_token_usage,
+			resume_launch_args_json=excluded.resume_launch_args_json,
+			fts_dirty=1,
 			updated_at=excluded.updated_at`,
 		s.AgentID, s.AgentInstanceID, s.SessionID, s.FormatName, s.FormatVersion,
 		s.FirstQuestion, s.FirstQuestionSource, s.FirstQuestionConfidence,
@@ -341,7 +371,7 @@ func (db *DB) UpsertSession(ctx context.Context, s *model.Session) error {
 		s.MessageCount, s.UserMessageCount, s.ToolCallCount,
 		s.ParentSessionID, boolInt(s.IsSubagent), string(s.Activity),
 		s.SourcePath, s.SourceID, s.SourceMtime, s.SourceSize, s.SourceOffset,
-		boolInt(s.HasTokenUsage), s.IndexedAt.Unix(), s.UpdatedAt.Unix())
+		boolInt(s.HasTokenUsage), resumeLaunchArgsJSON(s.ResumeLaunchArgs), s.IndexedAt.Unix(), s.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("写入会话 %s/%s: %w", s.AgentInstanceID, s.SessionID, err)
 	}
@@ -561,8 +591,9 @@ func (db *DB) SetActivity(ctx context.Context, instanceID, sessionID string, sta
 // SetAllActivityByAgent 批量更新某 Agent 全部会话的活动状态（单条 SQL）。
 func (db *DB) SetAllActivityByAgent(ctx context.Context, agentID model.AgentID, state model.ActivityState) (int64, error) {
 	res, err := db.sql.ExecContext(ctx,
-		`UPDATE sessions SET activity_state = ? WHERE agent_id = ?`,
-		string(state), string(agentID))
+		`UPDATE sessions SET activity_state = ?
+		 WHERE agent_id = ? AND activity_state <> ?`,
+		string(state), string(agentID), string(state))
 	if err != nil {
 		return 0, err
 	}
@@ -572,7 +603,8 @@ func (db *DB) SetAllActivityByAgent(ctx context.Context, agentID model.AgentID, 
 // SetAllActivity 批量更新全部会话的活动状态（单条 SQL）。
 func (db *DB) SetAllActivity(ctx context.Context, state model.ActivityState) (int64, error) {
 	res, err := db.sql.ExecContext(ctx,
-		`UPDATE sessions SET activity_state = ?`, string(state))
+		`UPDATE sessions SET activity_state = ? WHERE activity_state <> ?`,
+		string(state), string(state))
 	if err != nil {
 		return 0, err
 	}
@@ -583,7 +615,7 @@ func (db *DB) SetAllActivity(ctx context.Context, state model.ActivityState) (in
 func (db *DB) SetRecentActive(ctx context.Context, agentID model.AgentID, nSec int64) (int64, error) {
 	res, err := db.sql.ExecContext(ctx,
 		`UPDATE sessions SET activity_state = 'possibly_active'
-		 WHERE agent_id = ? AND source_mtime >= ?`,
+		 WHERE agent_id = ? AND source_mtime >= ? AND activity_state <> 'possibly_active'`,
 		string(agentID), time.Now().Add(-time.Duration(nSec)*time.Second).Unix())
 	if err != nil {
 		return 0, err

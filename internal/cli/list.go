@@ -157,8 +157,20 @@ func newIndexCmd() *cobra.Command {
 				if err := search.Rebuild(ctx, db); err != nil {
 					return err
 				}
-			} else if err := search.Populate(ctx, db); err != nil {
-				return err
+			} else if indexResultsChanged(results) {
+				if err := search.Populate(ctx, db); err != nil {
+					return err
+				}
+			} else {
+				need, err := search.NeedsPopulate(ctx, db)
+				if err != nil {
+					return err
+				}
+				if need {
+					if err := search.Populate(ctx, db); err != nil {
+						return err
+					}
+				}
 			}
 			if !metadataOnly {
 				ix := &index.Indexer{App: a, DB: db}
@@ -186,6 +198,15 @@ func newIndexCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&rebuildFlag, "rebuild", false, i18n.Tr("full rebuild index", "全量重建索引"))
 	cmd.Flags().BoolVar(&metadataOnly, "metadata-only", false, i18n.Tr("metadata only", "仅索引元数据"))
 	return cmd
+}
+
+func indexResultsChanged(results []index.Result) bool {
+	for _, result := range results {
+		if result.Changed {
+			return true
+		}
+	}
+	return false
 }
 
 func newConfigCmd() *cobra.Command {

@@ -645,6 +645,72 @@ func TestLoadingViewRendersSpinner(t *testing.T) {
 	}
 }
 
+func TestCachedListShowsBackgroundSyncStatus(t *testing.T) {
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()},
+		[]*model.Session{mkTuiSession("cached", "/tmp")}, nil, nil, "", "")
+	m.width, m.height = 100, 20
+	m.list.SetSize(100, m.listHeight(m.height, m.width))
+	m.syncing = true
+	out := m.View()
+	if !strings.Contains(out, "后台更新") && !strings.Contains(out, "Updating session index") {
+		t.Fatalf("cached view should show syncing status: %q", out)
+	}
+	if !strings.Contains(out, "cached") {
+		t.Fatalf("cached view should keep session list: %q", out)
+	}
+	m.syncing = false
+	m.syncErr = errors.New("boom")
+	out = m.View()
+	if !strings.Contains(out, "后台同步失败") && !strings.Contains(out, "sync failed") {
+		t.Fatalf("cached view should show sync failure: %q", out)
+	}
+}
+
+func TestBackgroundSyncFailureKeepsCachedSessions(t *testing.T) {
+	session := mkTuiSession("cached", "/tmp")
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()},
+		[]*model.Session{session}, nil, nil, "", "")
+	m.syncing = true
+	m.indexErr = errors.New("boom")
+	nm, _ := m.Update(indexedMsg{})
+	got := nm.(*mainModel)
+	if got.syncing || got.syncErr == nil || len(got.sessions) != 1 {
+		t.Fatalf("background failure state: syncing=%v err=%v sessions=%d", got.syncing, got.syncErr, len(got.sessions))
+	}
+}
+
+func TestIndexedMsgPreservesCachedSelection(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := search.Ensure(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	first := mkTuiSession("first", "/tmp")
+	second := mkTuiSession("second", "/tmp")
+	for _, session := range []*model.Session{first, second} {
+		if err := db.UpsertSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := search.Populate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	m := newMain(ctx, &app.App{Registry: adapters.NewRegistry(), Config: config.Default()},
+		[]*model.Session{first}, nil, db, "", "")
+	m.syncing = true
+	m.list.Select(0)
+	if _, _ = m.Update(indexedMsg{}); m.list.SelectedItem().(item).sess.SessionID != "first" {
+		t.Fatal("selected cached session should survive refresh")
+	}
+}
+
 func TestLoadingViewShowsCurrentStage(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()

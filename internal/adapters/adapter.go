@@ -17,6 +17,26 @@ type SessionSource struct {
 	Offset    int64  `json:"offset"`
 }
 
+// DiscoveryState 是适配器增量发现所需的不透明游标。
+// 核心索引只保存和传递它，不解释 Agent 特有格式。
+type DiscoveryState struct {
+	Cursor string `json:"cursor"`
+}
+
+// IncrementalDiscoverer 是可选的增量来源发现能力。
+// 基础 Adapter.Discover 始终作为完整发现回退路径。
+type IncrementalDiscoverer interface {
+	DiscoverIncremental(
+		ctx context.Context,
+		instance model.AgentInstance,
+		state DiscoveryState,
+	) ([]SessionSource, DiscoveryState, error)
+	CursorFromSources(
+		instance model.AgentInstance,
+		sources []SessionSource,
+	) string
+}
+
 // Command 描述一条要执行的外部命令。
 type Command struct {
 	Program string   `json:"program"`

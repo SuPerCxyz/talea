@@ -151,6 +151,13 @@ type sessionMeta struct {
 	} `json:"git"`
 }
 
+type turnContext struct {
+	ApprovalPolicy string `json:"approval_policy"`
+	SandboxPolicy  struct {
+		Type string `json:"type"`
+	} `json:"sandbox_policy"`
+}
+
 // ParseMetadata 解析单个 rollout 文件元数据。
 func (a *Adapter) ParseMetadata(
 	ctx context.Context,
@@ -179,6 +186,8 @@ func (a *Adapter) ParseMetadata(
 		lastTs           *time.Time
 		usageSum         = &model.TokenUsage{Source: model.UsageSourceMessageMetadata}
 		requestCount     int64
+		approvalPolicy   string
+		sandboxMode      string
 	)
 	for {
 		o, ok, err := r.Next()
@@ -221,6 +230,17 @@ func (a *Adapter) ParseMetadata(
 				if hasTS {
 					s.StartedAt = &ts
 					s.StartTimeSource = model.TimeSourceSessionMeta
+				}
+			}
+		}
+		if line.Type == "turn_context" {
+			var context turnContext
+			if err := json.Unmarshal(line.Payload, &context); err == nil {
+				if validCodexApprovalPolicy(context.ApprovalPolicy) {
+					approvalPolicy = context.ApprovalPolicy
+				}
+				if validCodexSandboxMode(context.SandboxPolicy.Type) {
+					sandboxMode = context.SandboxPolicy.Type
 				}
 			}
 		}
@@ -289,6 +309,7 @@ func (a *Adapter) ParseMetadata(
 		usageSum.RequestCount = &requestCount
 		s.TokenUsage = usageSum
 	}
+	s.ResumeLaunchArgs = codexResumeArgs(approvalPolicy, sandboxMode)
 	s.UpdatedAt = time.Now()
 	return s, nil
 }
@@ -481,8 +502,79 @@ func (a *Adapter) BuildResumeCommand(s model.Session, cwd string) (adapters.Comm
 	}
 	return adapters.Command{
 		Program: "codex",
-		Args:    []string{"resume", s.SessionID},
+		Args: append(codexResumeArgsFromPersisted(s.ResumeLaunchArgs),
+			"resume", s.SessionID),
 	}, nil
+}
+
+func validCodexApprovalPolicy(policy string) bool {
+	return policy == "on-request" || policy == "never"
+}
+
+func validCodexSandboxMode(mode string) bool {
+	switch mode {
+	case "read-only", "workspace-write", "danger-full-access":
+		return true
+	default:
+		return false
+	}
+}
+
+func codexResumeArgs(approval, sandbox string) []string {
+	if approval == "never" && sandbox == "danger-full-access" {
+		return []string{"--dangerously-bypass-approvals-and-sandbox"}
+	}
+	args := make([]string, 0, 4)
+	if validCodexApprovalPolicy(approval) {
+		args = append(args, "--ask-for-approval", approval)
+	}
+	if validCodexSandboxMode(sandbox) {
+		args = append(args, "--sandbox", sandbox)
+	}
+	return args
+}
+
+func codexResumeArgsFromPersisted(args []string) []string {
+	if len(args) == 1 && args[0] == "--dangerously-bypass-approvals-and-sandbox" {
+		return append([]string(nil), args...)
+	}
+	if len(args) == 0 || len(args)%2 != 0 {
+		return nil
+	}
+	var approval, sandbox string
+	for i := 0; i < len(args); i += 2 {
+		switch args[i] {
+		case "--ask-for-approval":
+			if approval != "" || !validCodexApprovalPolicy(args[i+1]) {
+				return nil
+			}
+			approval = args[i+1]
+		case "--sandbox":
+			if sandbox != "" || !validCodexSandboxMode(args[i+1]) {
+				return nil
+			}
+			sandbox = args[i+1]
+		default:
+			return nil
+		}
+	}
+	validated := codexResumeArgs(approval, sandbox)
+	if !sameStrings(validated, args) {
+		return nil
+	}
+	return append([]string(nil), args...)
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // LoadUsage 返回会话 Token 汇总。

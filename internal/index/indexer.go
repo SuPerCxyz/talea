@@ -42,6 +42,7 @@ type Result struct {
 	Updated   int
 	Skipped   int
 	Errors    int
+	Changed   bool
 	ErrorMsgs []string
 }
 
@@ -71,7 +72,20 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 		if !ok {
 			continue
 		}
-		sources, err := ad.Discover(ctx, inst)
+		state, hasState, stateErr := ix.DB.LoadScanState(ctx, inst.InstanceID)
+		if stateErr != nil {
+			res.Errors++
+			res.ErrorMsgs = append(res.ErrorMsgs, fmt.Sprintf("读取来源状态失败: %v", stateErr))
+		}
+		knownPaths := trackedPaths(tracked, inst.InstanceID)
+		if !ix.Force && hasState && len(knownPaths) > 0 {
+			if fp, valid, fpErr := FingerprintSources(inst.DataDirectory, knownPaths); fpErr == nil && valid && fp == state.Fingerprint {
+				res.Skipped += trackedCount(tracked, inst.InstanceID)
+				out = append(out, res)
+				continue
+			}
+		}
+		sources, nextState, err := discoverSources(ctx, ad, inst, discoveryState(state, hasState))
 		if err != nil {
 			res.Errors++
 			res.ErrorMsgs = append(res.ErrorMsgs, err.Error())
@@ -106,10 +120,11 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 			if off, err := extract.LastCompleteLineOffset(sess.SourcePath); err == nil {
 				sess.SourceOffset = off
 			}
-			ix.App.ResolveWorkingDirs(ctx, []*model.Session{sess})
 			batch = append(batch, sess)
 		}
 		if len(batch) > 0 {
+			ix.App.ResolveWorkingDirs(ctx, batch)
+			res.Changed = true
 			st, err := ix.DB.UpsertMany(ctx, batch)
 			if err != nil {
 				res.Errors++
@@ -136,9 +151,40 @@ func (ix *Indexer) Run(ctx context.Context) ([]Result, error) {
 				}
 			}
 		}
+		if stateErr == nil && res.Errors == 0 {
+			paths := mergePaths(knownPaths, sourcePaths(sources))
+			if fp, valid, fpErr := FingerprintSources(inst.DataDirectory, paths); fpErr == nil && valid {
+				saveErr := ix.DB.SaveScanState(ctx, ScanState{
+					AgentInstanceID: inst.InstanceID,
+					Fingerprint:     fp,
+					Cursor:          nextState.Cursor,
+				})
+				if saveErr != nil {
+					res.Errors++
+					res.ErrorMsgs = append(res.ErrorMsgs, fmt.Sprintf("保存来源状态失败: %v", saveErr))
+				}
+			}
+		}
 		out = append(out, res)
 	}
 	return out, nil
+}
+
+func discoveryState(state ScanState, ok bool) adapters.DiscoveryState {
+	if !ok {
+		return adapters.DiscoveryState{}
+	}
+	return adapters.DiscoveryState{Cursor: state.Cursor}
+}
+
+func trackedCount(tracked map[string]TrackedSource, instanceID string) int {
+	count := 0
+	for _, source := range tracked {
+		if source.AgentInstanceID == instanceID {
+			count++
+		}
+	}
+	return count
 }
 
 func (ix *Indexer) reportProgress(stage ProgressStage) {

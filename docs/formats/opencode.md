@@ -118,7 +118,8 @@ opencode -s <session-id>
 
 - 必须使用 `file:...?mode=ro` URI 只读打开。
 - 必须设置 busy timeout（WAL 模式，其他进程可能持有锁）。
-- 数据库很大（6GB），禁止整库复制；增量索引基于 `time_updated`。
+- 数据库很大（6GB），禁止整库复制；Talea 先用数据库/WAL 本地指纹判断是否变化，变化时使用
+  `(time_updated, session_id)` 高水位和安全重叠窗口查询候选，游标缺失或查询不可靠时回退完整发现。
 - 只读打开不 checkpoint WAL，可读到已提交但未 checkpoint 的数据——符合预期。
 
 ## 已知限制 / 未确认项

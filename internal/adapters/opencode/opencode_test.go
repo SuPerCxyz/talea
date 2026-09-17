@@ -104,6 +104,64 @@ func TestParseMetadataSimple(t *testing.T) {
 	}
 }
 
+func TestDiscoverIncrementalUsesCursor(t *testing.T) {
+	ctx := context.Background()
+	path := createFixtureDB(t)
+	a := New()
+	inst := model.AgentInstance{InstanceID: "t", AgentID: model.AgentOpenCode, DataDirectory: filepath.Dir(path)}
+	sources, state, err := a.DiscoverIncremental(ctx, inst, adapters.DiscoveryState{})
+	if err != nil || len(sources) != 1 || state.Cursor == "" {
+		t.Fatalf("initial discovery: sources=%d cursor=%q err=%v", len(sources), state.Cursor, err)
+	}
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO session (id, title, time_created, time_updated)
+		VALUES ('ses_0002', 'new', 1785919370605, 1785919370605)`)
+	_ = db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, next, err := a.DiscoverIncremental(ctx, inst, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, candidate := range candidates {
+		if candidate.SessionID == "ses_0002" {
+			found = true
+		}
+	}
+	if !found || next.Cursor == "" {
+		t.Fatalf("incremental candidates=%v next=%q", candidates, next.Cursor)
+	}
+}
+
+func TestDiscoverIncrementalRejectsInvalidCursor(t *testing.T) {
+	path := createFixtureDB(t)
+	_, _, err := New().DiscoverIncremental(context.Background(),
+		model.AgentInstance{DataDirectory: filepath.Dir(path)}, adapters.DiscoveryState{Cursor: "bad"})
+	if err == nil {
+		t.Fatal("invalid cursor should fail")
+	}
+}
+
+func TestCursorUsesSessionIDForSameTimestamp(t *testing.T) {
+	a := New()
+	state := a.CursorFromSources(model.AgentInstance{}, []adapters.SessionSource{
+		{SessionID: "ses_a", Mtime: 100},
+		{SessionID: "ses_z", Mtime: 100},
+	})
+	cur, err := decodeCursor(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.TimeUpdated != 100 || cur.SessionID != "ses_z" {
+		t.Fatalf("cursor=%+v", cur)
+	}
+}
+
 func TestBuildResumeCommand(t *testing.T) {
 	a := New()
 	cmd, err := a.BuildResumeCommand(model.Session{SessionID: "ses_0001"}, "/work")
@@ -115,5 +173,18 @@ func TestBuildResumeCommand(t *testing.T) {
 	}
 	if len(cmd.Args) != 2 || cmd.Args[0] != "-s" {
 		t.Fatalf("args: %v", cmd.Args)
+	}
+}
+
+func TestBuildResumeCommandIgnoresUnverifiedLaunchArgs(t *testing.T) {
+	cmd, err := New().BuildResumeCommand(model.Session{
+		SessionID:        "ses_0001",
+		ResumeLaunchArgs: []string{"--auto"},
+	}, "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cmd.Args) != 2 || cmd.Args[0] != "-s" || cmd.Args[1] != "ses_0001" {
+		t.Fatalf("args=%v", cmd.Args)
 	}
 }

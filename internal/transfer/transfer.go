@@ -47,7 +47,7 @@ func Export(ctx context.Context, db *index.DB, outPath string) error {
 		       message_count, user_message_count, tool_call_count,
 		       parent_session_id, is_subagent, activity_state,
 		       source_path, source_id, source_mtime, source_size, source_offset,
-		       has_token_usage, format_name, format_version
+		       has_token_usage, resume_launch_args_json, format_name, format_version
 		FROM sessions`)
 	if err != nil {
 		return err
@@ -62,7 +62,7 @@ func Export(ctx context.Context, db *index.DB, outPath string) error {
 		var wdExists, subagent int
 		var fqSource, eTS, sTS string
 		var fqConf sql.NullFloat64
-		var wdSource string
+		var wdSource, resumeArgs string
 		if err := rows.Scan(
 			&s.AgentID, &s.AgentInstanceID, &s.SessionID,
 			&s.FirstQuestion, &fqSource, &fqConf,
@@ -73,7 +73,7 @@ func Export(ctx context.Context, db *index.DB, outPath string) error {
 			&s.MessageCount, &s.UserMessageCount, &s.ToolCallCount,
 			&s.ParentSessionID, &subagent, &s.Activity,
 			&s.SourcePath, &s.SourceID, &s.SourceMtime, &s.SourceSize, &s.SourceOffset,
-			&s.HasTokenUsage, &s.FormatName, &s.FormatVersion,
+			&s.HasTokenUsage, &resumeArgs, &s.FormatName, &s.FormatVersion,
 		); err != nil {
 			continue
 		}
@@ -93,6 +93,9 @@ func Export(ctx context.Context, db *index.DB, outPath string) error {
 			s.FirstQuestionConfidence = fqConf.Float64
 		}
 		s.WorkingDirSource = wdSource
+		if resumeArgs != "" && resumeArgs != "null" {
+			_ = json.Unmarshal([]byte(resumeArgs), &s.ResumeLaunchArgs)
+		}
 
 		es := ExportSession{Session: s}
 		if u, err := usage.Load(ctx, db, s.AgentInstanceID, s.SessionID); err == nil {

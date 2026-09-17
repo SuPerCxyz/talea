@@ -53,12 +53,15 @@ type Adapter interface {
 ## 索引流程
 
 ```
-Discover(发现会话来源) → ParseMetadata(流式解析) → UpsertMany(事务写入)
+本地来源指纹未变化 → 跳过发现与解析
+来源变化 → Discover/增量 Discover → ParseMetadata → UpsertMany(事务写入)
      → 时间线事件索引（source_identity 去重）
 ```
 
-增量依据：`(agent_instance_id, session_id)` 主键 + 源文件 mtime/size。
-文件未变化则跳过；变化则重新解析。
+增量依据：Talea 本地来源指纹、`(agent_instance_id, session_id)` 主键和源记录
+mtime/size。Claude/Codex 的来源指纹由已知文件及父目录元数据组成；OpenCode
+额外保存 `(time_updated, session_id)` 高水位，查询失败或状态不确定时回退完整发现。
+来源未变化则跳过；变化时仅重新解析候选中实际变化的会话。
 
 ## 恢复流程
 
@@ -78,6 +81,8 @@ Discover(发现会话来源) → ParseMetadata(流式解析) → UpsertMany(事�
 
 ## 性能设计
 
+- TUI 先显示已有索引，来源同步在后台刷新；首次没有缓存时才阻塞在加载态。
+- 索引库保存来源指纹、OpenCode 游标和 FTS 脏状态，重复启动不重复扫描、写活动状态或重建 FTS。
 - 元数据索引只读一次文件首尾与关键字段，不加载全文。
 - FTS5 trigram tokenizer 支持中文 3 字以上匹配；短词用 LIKE 兜底。
 - 时间线分页查询；图表使用聚合数据。

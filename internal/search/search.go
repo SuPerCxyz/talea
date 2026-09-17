@@ -4,6 +4,7 @@ package search
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,33 @@ func Ensure(ctx context.Context, db *index.DB) error {
 	return nil
 }
 
+// NeedsPopulate 判断 FTS 是否需要补齐。正常路径只看脏标记；行数不一致时
+// 将全部会话标脏，覆盖索引被清空或迁移中断的情况。
+func NeedsPopulate(ctx context.Context, db *index.DB) (bool, error) {
+	var dirty int
+	if err := db.SQL().QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM sessions WHERE fts_dirty=1)`).Scan(&dirty); err != nil {
+		return false, err
+	}
+	if dirty != 0 {
+		return true, nil
+	}
+	var sessions, fts int
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions`).Scan(&sessions); err != nil {
+		return false, err
+	}
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM session_fts`).Scan(&fts); err != nil {
+		return false, err
+	}
+	if sessions == fts {
+		return false, nil
+	}
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE sessions SET fts_dirty=1`); err != nil {
+		return false, err
+	}
+	return sessions > 0, nil
+}
+
 // ftsRow 是待写入 FTS 表的一行。
 type ftsRow struct {
 	rid                 int
@@ -78,21 +106,26 @@ func ftsInsert(ctx context.Context, tx *sql.Tx, batch []ftsRow) error {
 	}
 	defer func() { _ = stmt.Close() }()
 	for _, r := range batch {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM session_fts WHERE rowid=?`, r.rid); err != nil {
+			return err
+		}
 		if _, err := stmt.ExecContext(ctx, r.rid, r.sid, r.fq, r.wd, r.pn, r.gb); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET fts_dirty=0 WHERE rowid=?`, r.rid); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// Populate 增量同步 FTS 表：只插入缺失行，不重建。
-// 适用于 list/search 每次调用（O(新行) 而非 O(全表)）。
+// Populate 增量同步 FTS 表：只处理脏会话行，不重建。
+// 适用于 list/search 每次调用（O(变化行) 而非 O(全表)）。
 // 单事务批量写入，避免逐条 autocommit 的 fsync 开销。
 func Populate(ctx context.Context, db *index.DB) error {
 	rows, err := db.SQL().QueryContext(ctx,
 		`SELECT s.rowid, s.session_id, s.first_question, s.working_directory, s.project_name, s.git_branch
-		 FROM sessions s
-		 WHERE NOT EXISTS(SELECT 1 FROM session_fts f WHERE f.rowid = s.rowid)`)
+		 FROM sessions s WHERE s.fts_dirty=1`)
 	if err != nil {
 		return err
 	}
@@ -219,7 +252,7 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		       s.working_directory, s.git_branch,
 		       s.is_subagent, s.has_token_usage,
 		       s.source_path, s.source_id, s.source_mtime,
-		       s.source_size, s.source_offset,
+		       s.source_size, s.source_offset, s.resume_launch_args_json,
 		       s.format_name, s.format_version,
 		       s.working_dir_exists, s.project_name, s.git_root, s.git_remote,
 		       s.activity_state,
@@ -267,7 +300,7 @@ func ByIDPrefix(ctx context.Context, db *index.DB, prefix, agent string, limit i
 		       s.working_directory, s.git_branch,
 		       s.is_subagent, s.has_token_usage,
 		       s.source_path, s.source_id, s.source_mtime,
-		       s.source_size, s.source_offset,
+		       s.source_size, s.source_offset, s.resume_launch_args_json,
 		       s.format_name, s.format_version,
 		       s.working_dir_exists, s.project_name, s.git_root, s.git_remote,
 		       s.activity_state,
@@ -298,6 +331,7 @@ func scanSessions(rows *sql.Rows) ([]Result, error) {
 			duration             *int64
 			wdExists             int
 			activity             string
+			resumeArgs           string
 			inTok, outTok        sql.NullInt64
 			totTok, peakTok      sql.NullInt64
 			score                float64
@@ -307,7 +341,7 @@ func scanSessions(rows *sql.Rows) ([]Result, error) {
 			&s.WorkingDirectory, &s.GitBranch,
 			&s.IsSubagent, &s.HasTokenUsage,
 			&s.SourcePath, &s.SourceID, &s.SourceMtime,
-			&s.SourceSize, &s.SourceOffset,
+			&s.SourceSize, &s.SourceOffset, &resumeArgs,
 			&s.FormatName, &s.FormatVersion,
 			&wdExists, &s.ProjectName, &s.GitRoot, &s.GitRemote,
 			&activity,
@@ -317,6 +351,7 @@ func scanSessions(rows *sql.Rows) ([]Result, error) {
 		}
 		s.WorkingDirExists = wdExists != 0
 		s.Activity = model.ActivityState(activity)
+		s.ResumeLaunchArgs = decodeResumeLaunchArgs(resumeArgs)
 		if started != nil {
 			t := fromEpoch(*started)
 			s.StartedAt = &t
@@ -344,6 +379,17 @@ func scanSessions(rows *sql.Rows) ([]Result, error) {
 		out = append(out, Result{Session: s, Score: -score})
 	}
 	return out, rows.Err()
+}
+
+func decodeResumeLaunchArgs(raw string) []string {
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	var args []string
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		return nil
+	}
+	return args
 }
 
 // List 列出会话（与 Search 共用，无关键词时）。

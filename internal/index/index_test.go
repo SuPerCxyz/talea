@@ -120,6 +120,28 @@ func TestLoadTracked(t *testing.T) {
 	}
 }
 
+func TestActivityUpdatesAreIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	s := mkSession("activity")
+	s.Activity = model.ActivityUnknown
+	if err := db.UpsertSession(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := db.SetAllActivity(ctx, model.ActivityInactive); err != nil || n != 1 {
+		t.Fatalf("first inactive update: n=%d err=%v", n, err)
+	}
+	if n, err := db.SetAllActivity(ctx, model.ActivityInactive); err != nil || n != 0 {
+		t.Fatalf("repeated inactive update: n=%d err=%v", n, err)
+	}
+	if n, err := db.SetAllActivityByAgent(ctx, model.AgentClaudeCode, model.ActivityPossiblyActive); err != nil || n != 1 {
+		t.Fatalf("agent activity update: n=%d err=%v", n, err)
+	}
+	if n, err := db.SetAllActivityByAgent(ctx, model.AgentClaudeCode, model.ActivityPossiblyActive); err != nil || n != 0 {
+		t.Fatalf("repeated agent activity update: n=%d err=%v", n, err)
+	}
+}
+
 func TestTimelineEventDedup(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

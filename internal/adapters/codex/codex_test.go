@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -84,4 +85,80 @@ func TestBuildResumeCommand(t *testing.T) {
 	if len(cmd.Args) != 2 || cmd.Args[0] != "resume" {
 		t.Fatalf("args: %v", cmd.Args)
 	}
+}
+
+func TestTurnContextPoliciesAreRestored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "turn-context.jsonl")
+	content := `{"type":"session_meta","payload":{"session_id":"s"}}
+{"type":"turn_context","payload":{"approval_policy":"never","sandbox_policy":{"type":"danger-full-access"}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New().ParseMetadata(context.Background(),
+		model.AgentInstance{InstanceID: "t", AgentID: model.AgentCodexCLI},
+		adapters.SessionSource{SessionID: "s", Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := New().BuildResumeCommand(*s, "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--dangerously-bypass-approvals-and-sandbox", "resume", "s"}
+	if !sameArgs(cmd.Args, want) {
+		t.Fatalf("args=%v want=%v", cmd.Args, want)
+	}
+}
+
+func TestUnknownTurnContextPolicyIsIgnored(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "turn-context.jsonl")
+	content := `{"type":"turn_context","payload":{"approval_policy":"always","sandbox_policy":{"type":"unknown"}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New().ParseMetadata(context.Background(),
+		model.AgentInstance{InstanceID: "t", AgentID: model.AgentCodexCLI},
+		adapters.SessionSource{SessionID: "s", Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.ResumeLaunchArgs) != 0 {
+		t.Fatalf("unknown policy args=%v", s.ResumeLaunchArgs)
+	}
+}
+
+func TestCodexPartialPolicyArgs(t *testing.T) {
+	if got := codexResumeArgs("never", ""); !sameArgs(got, []string{"--ask-for-approval", "never"}) {
+		t.Fatalf("approval args=%v", got)
+	}
+	if got := codexResumeArgs("", "workspace-write"); !sameArgs(got, []string{"--sandbox", "workspace-write"}) {
+		t.Fatalf("sandbox args=%v", got)
+	}
+}
+
+func TestInvalidPersistedPolicyArgsAreIgnored(t *testing.T) {
+	cmd, err := New().BuildResumeCommand(model.Session{
+		SessionID:        "s",
+		ResumeLaunchArgs: []string{"--shell", "rm -rf /"},
+	}, "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameArgs(cmd.Args, []string{"resume", "s"}) {
+		t.Fatalf("args=%v", cmd.Args)
+	}
+}
+
+func sameArgs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

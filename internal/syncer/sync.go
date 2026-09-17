@@ -45,15 +45,29 @@ func SyncWithProgress(ctx context.Context, a *app.App, db *index.DB, progress Pr
 			}
 		},
 	}
-	if _, err := ix.Run(ctx); err != nil {
+	results, err := ix.Run(ctx)
+	if err != nil {
 		return err
 	}
 	report(progress, StagePreparing)
 	if err := search.Ensure(ctx, db); err != nil {
 		return err
 	}
-	if err := search.Populate(ctx, db); err != nil {
-		return err
+	changed := false
+	for _, result := range results {
+		changed = changed || result.Changed
+	}
+	needFTS := changed
+	if !needFTS {
+		needFTS, err = search.NeedsPopulate(ctx, db)
+		if err != nil {
+			return err
+		}
+	}
+	if needFTS {
+		if err := search.Populate(ctx, db); err != nil {
+			return err
+		}
 	}
 	// 重新检测活动状态（进程运行中/最近更新），保证读取时状态准确
 	_, _ = ix.RefreshActivities(ctx)

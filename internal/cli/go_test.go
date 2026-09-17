@@ -88,6 +88,28 @@ func TestQueryGoSessionsDirFilter(t *testing.T) {
 	}
 }
 
+func TestQueryGoSessionsPreservesResumeArgs(t *testing.T) {
+	ctx := context.Background()
+	db, err := index.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s := mkGoSession("ses_args", "/tmp", time.Now())
+	s.ResumeLaunchArgs = []string{"--permission-mode", "bypassPermissions"}
+	insertGoSession(t, db, s)
+	got, err := queryGoSessions(ctx, db, "")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("sessions=%v err=%v", got, err)
+	}
+	if len(got[0].ResumeLaunchArgs) != 2 || got[0].ResumeLaunchArgs[1] != "bypassPermissions" {
+		t.Fatalf("resume args=%v", got[0].ResumeLaunchArgs)
+	}
+}
+
 func insertGoSession(t *testing.T, db *index.DB, s *model.Session) {
 	t.Helper()
 	if err := db.UpsertSession(context.Background(), s); err != nil {
