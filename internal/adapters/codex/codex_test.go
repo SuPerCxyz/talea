@@ -111,6 +111,31 @@ func TestTurnContextPoliciesAreRestored(t *testing.T) {
 	}
 }
 
+func TestLatestTurnContextPolicyWins(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "turn-context-history.jsonl")
+	content := `{"type":"session_meta","payload":{"session_id":"s"}}
+{"type":"turn_context","payload":{"approval_policy":"on-request","sandbox_policy":{"type":"workspace-write"}}}
+{"type":"turn_context","payload":{"approval_policy":"never","sandbox_policy":{"type":"danger-full-access"}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New().ParseMetadata(context.Background(),
+		model.AgentInstance{InstanceID: "t", AgentID: model.AgentCodexCLI},
+		adapters.SessionSource{SessionID: "s", Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := New().BuildResumeCommand(*s, "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--dangerously-bypass-approvals-and-sandbox", "resume", "s"}
+	if !sameArgs(cmd.Args, want) {
+		t.Fatalf("args=%v want=%v", cmd.Args, want)
+	}
+}
+
 func TestUnknownTurnContextPolicyIsIgnored(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "turn-context.jsonl")
 	content := `{"type":"turn_context","payload":{"approval_policy":"always","sandbox_policy":{"type":"unknown"}}}

@@ -4,7 +4,7 @@
 
 | 项 | 值 |
 |----|-----|
-| 版本 | 0.146.0（`codex --version` 实测，显示 codex-cli 0.146.0） |
+| 版本 | 0.155.0（`codex --version` 实测，显示 codex-cli 0.155.0） |
 | 二进制 | `~/.npm-global/bin/codex` |
 | 数据目录 | `~/.codex/` |
 | 会话文件 | `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<sessionId>.jsonl` |
@@ -26,7 +26,7 @@
 }}
 ```
 
-其余行类型：`event_msg`（含 `task_started`、`token_count` 等）、`response_item`（含 `message`、`custom_tool_call_output` 等）、`world_state`、`turn_context`。
+其余行类型：`event_msg`（含 `task_started`、`token_count` 等）、`response_item`（含 `message`、`custom_tool_call_output` 等）、`world_state`、`turn_context`。同一会话可包含多次 `turn_context`，后续有效策略代表最近一次运行策略。
 
 ## response_item.message 结构（用户消息）
 
@@ -108,7 +108,9 @@ Talea 会读取会话中的 `turn_context` 权限策略并保存已验证的恢�
 - 单独的已知审批或沙箱策略：恢复为对应的 `--ask-for-approval` / `--sandbox` 参数；
 - 缺失或未知策略：不添加参数，使用默认恢复命令。
 
-原始 `--yolo` 拼写不一定保存在会话中，恢复时使用当前 CLI 的等价规范化参数。
+若会话先以普通策略启动、之后通过 `codex resume <id> --yolo` 继续，Talea 会使用后续
+`turn_context` 的策略覆盖早期值。原始 `--yolo` 拼写不作为任意命令行保存；恢复使用当前
+CLI 支持的语义等价参数，并将全局选项放在 `resume <id>` 之前。
 
 ## 已知限制 / 未确认项
 

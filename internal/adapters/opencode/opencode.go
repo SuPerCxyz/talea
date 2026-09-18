@@ -73,6 +73,37 @@ var versionOnce = sync.OnceValue(func() string {
 
 func versionOf() string { return versionOnce() }
 
+// opencodeDatabasePath 解析 OpenCode 当前使用的数据库路径。
+// v2 优先由 CLI 解析，旧版或探测失败时回退到固定路径。
+func opencodeDatabasePath(ctx context.Context, inst model.AgentInstance) string {
+	if override := strings.TrimSpace(os.Getenv("OPENCODE_DB")); override != "" {
+		if filepath.IsAbs(override) {
+			return filepath.Clean(override)
+		}
+		return filepath.Join(inst.DataDirectory, override)
+	}
+	if path := cliDatabasePath(ctx); path != "" {
+		return path
+	}
+	return filepath.Join(inst.DataDirectory, dbFileName)
+}
+
+func cliDatabasePath(ctx context.Context) string {
+	bin, err := exec.LookPath("opencode")
+	if err != nil {
+		return ""
+	}
+	out, err := exec.CommandContext(ctx, bin, "debug", "paths", "db").Output()
+	if err != nil {
+		return ""
+	}
+	path := strings.TrimSpace(string(out))
+	if path == "" || !filepath.IsAbs(path) {
+		return ""
+	}
+	return filepath.Clean(path)
+}
+
 // Detect 探测本机安装。
 func (a *Adapter) Detect(ctx context.Context) ([]model.AgentInstance, error) {
 	bin, err := exec.LookPath("opencode")
@@ -116,7 +147,7 @@ func openRO(path string) (*sql.DB, error) {
 
 // Discover 发现数据库中的会话。
 func (a *Adapter) Discover(ctx context.Context, inst model.AgentInstance) ([]adapters.SessionSource, error) {
-	dbPath := filepath.Join(inst.DataDirectory, dbFileName)
+	dbPath := opencodeDatabasePath(ctx, inst)
 	return a.discoverQuery(ctx, dbPath,
 		`SELECT id, time_updated, coalesce(length(title),0) FROM session`)
 }
@@ -127,7 +158,7 @@ func (a *Adapter) DiscoverIncremental(
 	inst model.AgentInstance,
 	state adapters.DiscoveryState,
 ) ([]adapters.SessionSource, adapters.DiscoveryState, error) {
-	dbPath := filepath.Join(inst.DataDirectory, dbFileName)
+	dbPath := opencodeDatabasePath(ctx, inst)
 	if state.Cursor == "" {
 		sources, err := a.Discover(ctx, inst)
 		return sources, adapters.DiscoveryState{Cursor: a.CursorFromSources(inst, sources)}, err
@@ -234,11 +265,11 @@ func (a *Adapter) discoverQuery(ctx context.Context, dbPath, query string, args 
 type sessionRow struct {
 	ID               string
 	Directory        string
-	Path             string
+	Path             sql.NullString
 	Title            string
 	ParentID         sql.NullString
-	Model            string
-	Agent            string
+	Model            sql.NullString
+	Agent            sql.NullString
 	TokensInput      sql.NullInt64
 	TokensOutput     sql.NullInt64
 	TokensReasoning  sql.NullInt64
@@ -303,8 +334,8 @@ func (a *Adapter) ParseMetadata(
 	out.ParentSessionID = s.ParentID.String
 	out.IsSubagent = s.ParentID.Valid && s.ParentID.String != ""
 
-	if s.Agent != "" {
-		out.FormatVersion = s.Agent
+	if s.Agent.Valid && s.Agent.String != "" {
+		out.FormatVersion = s.Agent.String
 	}
 	if s.Title != "" && s.Title != "New session" {
 		// title 为 Agent 自动生成标题，仅作为会话说明，不用于首次提问
@@ -312,7 +343,7 @@ func (a *Adapter) ParseMetadata(
 	}
 
 	// Token 汇总（会话级，完整）
-	if s.TokensInput.Valid || s.TokensOutput.Valid {
+	if hasKnownTokenUsage(s) {
 		out.HasTokenUsage = true
 		u := &model.TokenUsage{Source: model.UsageSourceAgentDatabase, Completeness: model.UsageComplete}
 		if s.TokensInput.Valid {
@@ -342,6 +373,18 @@ func (a *Adapter) ParseMetadata(
 
 	out.UpdatedAt = time.Now()
 	return out, nil
+}
+
+func hasKnownTokenUsage(s sessionRow) bool {
+	return positiveToken(s.TokensInput) ||
+		positiveToken(s.TokensOutput) ||
+		positiveToken(s.TokensReasoning) ||
+		positiveToken(s.TokensCacheRead) ||
+		positiveToken(s.TokensCacheWrite)
+}
+
+func positiveToken(v sql.NullInt64) bool {
+	return v.Valid && v.Int64 > 0
 }
 
 // firstQuestion 读取最早 user 消息正文。

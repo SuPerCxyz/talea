@@ -4,16 +4,16 @@
 
 | 项 | 值 |
 |----|-----|
-| 版本 | 1.18.14（`opencode --version` 实测，2026-08-06） |
+| 版本 | 2.0.7（`opencode --version` 实测，2026-09-18） |
 | 二进制 | `~/.npm-global/bin/opencode` |
-| 数据目录 | `~/.local/share/opencode/` |
-| 数据库 | `opencode.db`（SQLite，实测约 6GB，WAL 约 578MB） |
+| 数据目录 | `opencode debug paths data` 输出的目录 |
+| 数据库 | `opencode debug paths db` 输出的 SQLite 路径；支持 `OPENCODE_DB` 覆盖 |
 | 配置 | `~/.config/opencode/opencode.json` |
-| 表结构 | session / message / part / project / workspace 等 |
+| 表结构 | v1 保留的 session / message / part，以及 v2 的 session_message / event 等 |
 
 ## 表结构（实测）
 
-### session
+### session（v1 数据仍由 v2 保留）
 
 ```sql
 id TEXT
@@ -38,7 +38,12 @@ time_compacting INTEGER
 time_archived INTEGER
 agent TEXT
 model TEXT
+permission TEXT
 ```
+
+v2 的 `path`、`agent`、`model` 等元数据允许为空；`session_message` 是新增的投影表，
+不替代仍被保留的 `message` / `part` 传统数据。Talea 使用传统表读取消息和时间线，
+避免在两套投影之间重复累计。
 
 ### message
 
@@ -85,7 +90,7 @@ part.data 类型（实测）：`text`、`reasoning`、`tool`、`step-start`、`s
 | 最后活动 | session.time_updated |
 | 工作目录 | session.directory / path |
 | 标题 | session.title（自动生成） |
-| 模型 | session.model（JSON：modelID/providerID） |
+| 模型 | session.model（JSON，可能为 NULL） |
 | 父子会话 | session.parent_id |
 | Token 汇总 | session.tokens_input/output/cache_read/cache_write/reasoning |
 | 用户消息 | message.data.role=user，正文在关联 part 的 text 块 |
@@ -99,7 +104,7 @@ part.data 类型（实测）：`text`、`reasoning`、`tool`、`step-start`、`s
 
 ## Token 字段含义
 
-- session 表 tokens_* 为**会话级汇总**（累计）。
+- session 表 tokens_* 为**会话级汇总**（累计）；v2 数据库默认零值不能单独证明用量已知，Talea 仅在存在正数用量时标记为已知。
 - step-finish 的 tokens 为**上下文快照**（total 为累计上下文，input 为本次增量，
   已实测确认 2026-08-05）。
 - 两者并存时必须按 §13.3 去重，避免重复累计。
@@ -110,32 +115,35 @@ part.data 类型（实测）：`text`、`reasoning`、`tool`、`step-start`、`s
 opencode -s <session-id>
 ```
 
-`opencode` 无子命令时默认进入 TUI，`-s <id>` 直接恢复指定会话（实测 1.18.14 进入
-会话且不要求消息参数）。注意：`opencode run -s <id>` 是"带消息运行"模式，不带消息
+`opencode` 无子命令时默认进入 TUI，`-s/--session <id>` 直接恢复指定会话（实测 2.0.7
+进入会话且不要求消息参数）。注意：`opencode run -s <id>` 是"带消息运行"模式，不带消息
 会报 `You must provide a message or a command`，不用于会话恢复。
+
+Talea 按以下顺序解析数据库路径：`OPENCODE_DB`、`opencode debug paths db`、
+`<data-directory>/opencode.db` 旧版回退。所有打开均为 SQLite 只读连接，并设置 busy timeout。
 
 ## 只读访问要求
 
 - 必须使用 `file:...?mode=ro` URI 只读打开。
 - 必须设置 busy timeout（WAL 模式，其他进程可能持有锁）。
-- 数据库很大（6GB），禁止整库复制；Talea 先用数据库/WAL 本地指纹判断是否变化，变化时使用
+- 数据库可能很大，禁止整库复制；Talea 先用数据库/WAL 本地指纹判断是否变化，变化时使用
   `(time_updated, session_id)` 高水位和安全重叠窗口查询候选，游标缺失或查询不可靠时回退完整发现。
 - 只读打开不 checkpoint WAL，可读到已提交但未 checkpoint 的数据——符合预期。
 
 ## 已知限制 / 未确认项
 
-- project/workspace 表的用途（可能与目录关联）未展开。
+- v2 `session_message` 投影表中仅存在的额外记录暂不合并到传统消息时间线。
 - session.path 与 directory 的关系未确认（样本中 path 为 `home/...` 无前导斜杠，directory 为完整路径）。
 - 子会话（parent_id 非空）的 usage 是否被计入父会话 tokens_* 需确认（当前按独立会话处理）。
 
 ## 测试样本来源
 
-真实环境 `~/.local/share/opencode/opencode.db` 只读查询（session/message/part）。夹具需从真实数据脱敏导出小样本，或手工构造等价结构。
+真实环境数据库通过 `opencode debug paths db` 定位并只读查询（session/message/part/session_message）。夹具需从真实数据脱敏导出小样本，或手工构造等价结构。
 
 ## 验证状态
 
-- [x] 真实环境验证：数据库表结构、session 字段、message/part 结构、step-finish tokens、恢复命令。
-- [x] 真实环境验证（2026-08-05 补充）：**WAL 可见性**（只读连接读到 20:13 的新会话，
-      WAL 578MB 未 checkpoint）、**子会话**（27 个带 parent_id，父会话 time_updated
-      覆盖子会话更新）、step-finish total 为累计上下文。
+- [x] 真实环境验证：v2.0.7 数据库表结构、session/message/part/session_message 结构、
+      step-finish tokens、恢复命令和 `OPENCODE_DB` 路径解析。
+- [x] 真实环境验证（2026-09-18 补充）：WAL 可见性、v2 投影表与传统表并存、可空元数据、
+      session Token 汇总和增量高水位查询。
 - [ ] 兼容性假设（未验证）：老版本 schema、子会话 usage 与父会话 tokens_* 的精确关系。

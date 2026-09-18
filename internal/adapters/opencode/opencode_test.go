@@ -34,6 +34,9 @@ func createFixtureDB(t *testing.T) string {
 			id TEXT, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT)`,
 		`CREATE TABLE part (
 			id TEXT, message_id TEXT, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT)`,
+		`CREATE TABLE session_message (
+			id TEXT, session_id TEXT, type TEXT, seq INTEGER,
+			time_created INTEGER, time_updated INTEGER, data TEXT)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -61,6 +64,22 @@ func createFixtureDB(t *testing.T) string {
 		 '{"type":"text","text":"请查看还有哪些未完成的任务"}'),
 		('prt_002','msg_002','ses_0001',1785740000000,1785740000000,
 		 '{"type":"text","text":"好的，已查看。"}')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO session (
+		id, directory, title, time_created, time_updated,
+		tokens_input, tokens_output, tokens_reasoning,
+		tokens_cache_read, tokens_cache_write)
+		VALUES ('ses_nullable', '/home/alice/code/nexora', '空元数据',
+		1785739928049, 1785739928049, 0, 0, 0, 0, 0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`INSERT INTO session_message
+		(id, session_id, type, seq, time_created, time_updated, data)
+		VALUES ('sm_001', 'ses_0001', 'assistant', 1,
+		1785740000000, 1785740000000, '{"content":[]}' )`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,13 +123,27 @@ func TestParseMetadataSimple(t *testing.T) {
 	}
 }
 
+func TestParseMetadataToleratesV2NullableFields(t *testing.T) {
+	path := createFixtureDB(t)
+	s, err := New().ParseMetadata(context.Background(),
+		model.AgentInstance{InstanceID: "t", AgentID: model.AgentOpenCode},
+		adapters.SessionSource{SessionID: "ses_nullable", Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.FormatVersion != "" || s.HasTokenUsage || s.TokenUsage != nil {
+		t.Fatalf("nullable metadata: format=%q hasUsage=%v usage=%v", s.FormatVersion, s.HasTokenUsage, s.TokenUsage)
+	}
+}
+
 func TestDiscoverIncrementalUsesCursor(t *testing.T) {
 	ctx := context.Background()
 	path := createFixtureDB(t)
+	t.Setenv("OPENCODE_DB", path)
 	a := New()
 	inst := model.AgentInstance{InstanceID: "t", AgentID: model.AgentOpenCode, DataDirectory: filepath.Dir(path)}
 	sources, state, err := a.DiscoverIncremental(ctx, inst, adapters.DiscoveryState{})
-	if err != nil || len(sources) != 1 || state.Cursor == "" {
+	if err != nil || len(sources) != 2 || state.Cursor == "" {
 		t.Fatalf("initial discovery: sources=%d cursor=%q err=%v", len(sources), state.Cursor, err)
 	}
 	db, err := sql.Open("sqlite", "file:"+path)
@@ -144,6 +177,43 @@ func TestDiscoverIncrementalRejectsInvalidCursor(t *testing.T) {
 		model.AgentInstance{DataDirectory: filepath.Dir(path)}, adapters.DiscoveryState{Cursor: "bad"})
 	if err == nil {
 		t.Fatal("invalid cursor should fail")
+	}
+}
+
+func TestDiscoverUsesDatabaseOverride(t *testing.T) {
+	path := createFixtureDB(t)
+	t.Setenv("OPENCODE_DB", path)
+	sources, err := New().Discover(context.Background(), model.AgentInstance{
+		InstanceID:    "t",
+		AgentID:       model.AgentOpenCode,
+		DataDirectory: filepath.Join(t.TempDir(), "not-used"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0].Path != path || sources[1].Path != path {
+		t.Fatalf("sources=%v", sources)
+	}
+}
+
+func TestDatabasePathFallsBackToLegacyLocation(t *testing.T) {
+	t.Setenv("OPENCODE_DB", "")
+	t.Setenv("PATH", "")
+	dataDir := t.TempDir()
+	got := opencodeDatabasePath(context.Background(), model.AgentInstance{DataDirectory: dataDir})
+	want := filepath.Join(dataDir, dbFileName)
+	if got != want {
+		t.Fatalf("database path=%q want=%q", got, want)
+	}
+}
+
+func TestDatabasePathResolvesRelativeOverride(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("OPENCODE_DB", "nested/opencode.db")
+	got := opencodeDatabasePath(context.Background(), model.AgentInstance{DataDirectory: dataDir})
+	want := filepath.Join(dataDir, "nested", "opencode.db")
+	if got != want {
+		t.Fatalf("database path=%q want=%q", got, want)
 	}
 }
 
