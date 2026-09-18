@@ -586,10 +586,10 @@ func TestPaginationDotsApplied(t *testing.T) {
 	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
 	m := newMain(ctx, a, []*model.Session{mkTuiSession("ses_1", "/home/user/nexora")}, nil, nil, "", "")
 
-	if !strings.Contains(m.list.Paginator.ActiveDot, "•") {
+	if !strings.Contains(m.list.Paginator.ActiveDot, "◆") {
 		t.Errorf("active dot should use the dot char, got %q", m.list.Paginator.ActiveDot)
 	}
-	if !strings.Contains(m.list.Paginator.InactiveDot, "•") {
+	if !strings.Contains(m.list.Paginator.InactiveDot, "◆") {
 		t.Errorf("inactive dot should use the dot char, got %q", m.list.Paginator.InactiveDot)
 	}
 	// 无 TTY 测试环境下 lipgloss 不输出 ANSI 序列，这里断言样式配置本身：
@@ -603,7 +603,7 @@ func TestPaginationDotsApplied(t *testing.T) {
 }
 
 // TestPaginationDotsRender 验证：设置尺寸后，真实 View 渲染输出中包含
-// 自定义实心分页圆点 ●（而非默认不可见深灰圆点）。
+// 自定义菱形分页指示（而非默认不可见深灰圆点）。
 func TestPaginationDotsRender(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
@@ -616,7 +616,7 @@ func TestPaginationDotsRender(t *testing.T) {
 	m := newMain(ctx, a, sessions, nil, nil, "", "")
 	m.list.SetSize(80, 30)
 	out := m.list.View()
-	if !strings.Contains(out, "•") {
+	if !strings.Contains(out, "◆") {
 		t.Errorf("pagination should render dots, got: %q", out)
 	}
 }
@@ -1020,6 +1020,20 @@ func TestKeyboardHelpIsCompleteAndResponsive(t *testing.T) {
 		}
 	}
 	assertLinesFit(t, veryNarrow, 20)
+}
+
+func TestKeyboardHelpUsesVisibleDiamondSeparators(t *testing.T) {
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, nil, "", "")
+	out := renderKeyHelp(m.keys.ShortHelp(), 120)
+	if !strings.Contains(out, footerSeparator) {
+		t.Fatalf("keyboard help should contain %q, got %q", footerSeparator, out)
+	}
+	if strings.Contains(out, "•") {
+		t.Fatalf("keyboard help should not use the old bullet separator, got %q", out)
+	}
+	if !footerSeparatorStyle.GetBold() {
+		t.Fatal("footer separator should be bold")
+	}
 }
 
 func TestListHeightAccountsForKeyboardHelp(t *testing.T) {

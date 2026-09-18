@@ -63,7 +63,8 @@ var (
 	footerDescStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#e0e0e0"})
 	footerSeparatorStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#7e57c2", Dark: "#c5b3e6"})
+				Bold(true).
+				Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"})
 )
 
 // newListDelegate 返回高对比度的列表项样式（每项 3 行：agent+usage / 首问 / 最近消息）。
@@ -129,8 +130,10 @@ func newListStyles() list.Styles {
 const (
 	// bullet 用于状态栏分隔点。
 	bullet = "•"
-	// pageDot 用于分页圆点；加粗高亮后比默认 • 醒目。
-	pageDot = "•"
+	// pageDot 用于分页指示；当前页加粗高亮后更醒目。
+	pageDot = "◆"
+	// footerSeparator 用于快捷键提示之间的醒目分隔。
+	footerSeparator = "◆"
 	// loadingCardMaxWidth 限制加载卡片宽度，避免宽屏中文案被拉得过散。
 	loadingCardMaxWidth = 64
 )
@@ -804,7 +807,7 @@ func keyHelpLineCount(bindings []key.Binding, width int) int {
 }
 
 func renderKeyHelp(bindings []key.Binding, width int) string {
-	separator := "  " + footerSeparatorStyle.Render("•") + "  "
+	separator := "  " + footerSeparatorStyle.Render(footerSeparator) + "  "
 	separatorWidth := lipgloss.Width(separator)
 	var lines []string
 	var line strings.Builder
