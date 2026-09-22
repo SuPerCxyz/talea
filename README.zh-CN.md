@@ -45,7 +45,7 @@ Talea 统一索引本机所有 AI Coding Agent 的会话历史，让你无需记
 |-------|---------|---------|
 | Claude Code | `~/.claude/projects/<enc-cwd>/<sessionId>.jsonl` | `claude --resume <id>` |
 | Codex CLI | `~/.codex/sessions/<Y>/<M>/<D>/rollout-*.jsonl` | `codex resume <id>` |
-| OpenCode v2 | `opencode debug paths db` 输出的 SQLite（支持 `OPENCODE_DB`） | `opencode -s <id>` |
+| OpenCode v2 | `opencode debug paths db` 输出的 SQLite（支持 `OPENCODE_DB`），有 `session_v2` 时会话读 `session_v2`/`session_message` | `opencode -s <id>` |
 | 任意 | 外部 `talea-adapter-<name>` 插件 | — |
 
 ## 安装

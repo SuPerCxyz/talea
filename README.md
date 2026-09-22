@@ -48,7 +48,7 @@ agents' data — it reads them **read-only** and keeps everything **local**.
 |-------|------------|----------------|
 | Claude Code | `~/.claude/projects/<enc-cwd>/<sessionId>.jsonl` | `claude --resume <id>` |
 | Codex CLI | `~/.codex/sessions/<Y>/<M>/<D>/rollout-*.jsonl` | `codex resume <id>` |
-| OpenCode v2 | SQLite path from `opencode debug paths db` (`OPENCODE_DB` supported) | `opencode -s <id>` |
+| OpenCode v2 | SQLite path from `opencode debug paths db` (`OPENCODE_DB` supported); sessions read from `session_v2`/`session_message` when present | `opencode -s <id>` |
 | Any | external `talea-adapter-<name>` plugin | — |
 
 ## Installation

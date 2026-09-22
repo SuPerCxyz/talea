@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -24,7 +23,6 @@ import (
 	"github.com/talea/talea/internal/index"
 	"github.com/talea/talea/internal/model"
 	"github.com/talea/talea/internal/resume"
-	"github.com/talea/talea/internal/search"
 	"github.com/talea/talea/internal/syncer"
 	"github.com/talea/talea/internal/timeline"
 )
@@ -138,101 +136,6 @@ const (
 	loadingCardMaxWidth = 64
 )
 
-// loadTuiSessions 加载 TUI 会话列表，dir 非空时仅保留该目录下的会话，
-// agent 非空时仅保留该 Agent 的会话。
-// 固定按结束时间倒序排列（最新结束在前），不受配置 default_sort 影响，
-// 与 talea list / talea go 保持一致。
-// 返回会话列表及对应的 usage 汇总（key=agent_instance_id\x00session_id）。
-func loadTuiSessions(ctx context.Context, a *app.App, db *index.DB, dir, agent string) ([]*model.Session, map[string]timeline.SessionUsageRow, error) {
-	results, err := search.List(ctx, db, search.Query{Cwd: dir, Agent: agent, Limit: 500})
-	if err != nil {
-		return nil, nil, err
-	}
-	sessions := make([]*model.Session, 0, len(results))
-	for i := range results {
-		sessions = append(sessions, &results[i].Session)
-	}
-	sort.SliceStable(sessions, func(i, j int) bool {
-		return endTs(sessions[i]) > endTs(sessions[j])
-	})
-	// 批量填充最近一次用户消息与 usage（供 TUI 展示）
-	fillLastUserPrompts(ctx, db, sessions)
-	usages := fillUsages(ctx, db, sessions)
-	return sessions, usages, nil
-}
-
-// fillUsages 批量查询会话的 Token 汇总（含缓存字段）。
-func fillUsages(ctx context.Context, db *index.DB, sessions []*model.Session) map[string]timeline.SessionUsageRow {
-	if db == nil || len(sessions) == 0 {
-		return nil
-	}
-	keys := make([][2]string, 0, len(sessions))
-	seen := map[string]bool{}
-	for _, s := range sessions {
-		if s.SessionID == "" {
-			continue
-		}
-		key := s.AgentInstanceID + "\x00" + s.SessionID
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		keys = append(keys, [2]string{s.AgentInstanceID, s.SessionID})
-	}
-	usages, err := timeline.UsageBySession(ctx, db, keys)
-	if err != nil {
-		return nil
-	}
-	return usages
-}
-
-// fillLastUserPrompts 批量查询会话的最后一次用户消息并写入 LastUserPrompt。
-func fillLastUserPrompts(ctx context.Context, db *index.DB, sessions []*model.Session) {
-	if db == nil || len(sessions) == 0 {
-		return
-	}
-	keys := make([][2]string, 0, len(sessions))
-	seen := map[string]int{}
-	for _, s := range sessions {
-		if s.SessionID == "" {
-			continue
-		}
-		key := s.AgentInstanceID + "\x00" + s.SessionID
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = len(keys)
-		keys = append(keys, [2]string{s.AgentInstanceID, s.SessionID})
-	}
-	prompts, err := timeline.LastUserPromptBySession(ctx, db, keys)
-	if err != nil {
-		return
-	}
-	for _, s := range sessions {
-		if s.SessionID == "" {
-			continue
-		}
-		key := s.AgentInstanceID + "\x00" + s.SessionID
-		if p, ok := prompts[key]; ok {
-			s.LastUserPrompt = p
-		}
-	}
-}
-
-// endTs 返回会话结束时间的 Unix 秒（无结束时间依次用开始时间、最后活动时间兜底）。
-func endTs(s *model.Session) int64 {
-	if s.EndedAt != nil {
-		return s.EndedAt.Unix()
-	}
-	if s.StartedAt != nil {
-		return s.StartedAt.Unix()
-	}
-	if s.LastActivityAt != nil {
-		return s.LastActivityAt.Unix()
-	}
-	return 0
-}
-
 // Run 启动 TUI。
 // dir 非空时仅列出该目录下的会话；agent 非空时仅列出该 Agent 的会话。
 func Run(ctx context.Context, dir, agent string) error {
@@ -331,6 +234,10 @@ type mainModel struct {
 	syncing      bool // 后台同步进行中
 	spinner      spinner.Model
 	send         func(tea.Msg)
+	// 同步完成提示状态（短暂展示后自动隐藏，隐藏后恢复列表高度）
+	syncDoneVisible bool // 完成提示显示中
+	syncDoneDelta   int  // 提示展示的会话计数差（db.Count 前后对比）
+	syncDoneCounted bool // 计数差是否真实可用（false 时仅提示完成、不展示数字）
 }
 
 type keyMap struct {
@@ -612,8 +519,10 @@ func (m *mainModel) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, m.runIndex)
 }
 
-// runIndex 后台执行增量索引并刷新列表。
+// runIndex 后台执行增量索引并刷新列表；
+// 同步前后各取一次会话数，产出完成提示所需的真实计数差。
 func (m *mainModel) runIndex() tea.Msg {
+	before, beforeOK := m.sessionCount()
 	// 与其他读取路径同源：增量索引 + FTS 同步 + 活动状态刷新。
 	// TUI 打开期间的新会话由此兜底刷新，静默 no-op 时成本可忽略。
 	err := syncer.SyncWithProgress(m.ctx, m.app, m.db, func(stage syncer.Stage) {
@@ -622,7 +531,12 @@ func (m *mainModel) runIndex() tea.Msg {
 		}
 	})
 	m.indexErr = err
-	return indexedMsg{}
+	after, afterOK := m.sessionCount()
+	delta, countsOK := 0, false
+	if beforeOK && afterOK {
+		delta, countsOK = after-before, true
+	}
+	return indexedMsg{delta: delta, countsOK: countsOK}
 }
 
 // loadingStageMsg 通知 TUI 更新加载阶段。
@@ -630,8 +544,11 @@ type loadingStageMsg struct {
 	stage syncer.Stage
 }
 
-// indexedMsg 通知索引完成。
-type indexedMsg struct{}
+// indexedMsg 通知索引完成；delta 为同步前后会话计数差，countsOK 表示计数是否真实可用。
+type indexedMsg struct {
+	delta    int
+	countsOK bool
+}
 
 // Update 处理消息。
 func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -652,39 +569,21 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
+		// 仅加载/同步进行中续订 tick；完成提示与空闲状态停止动画
+		return m, m.allowSpinnerTick(cmd)
 	case loadingStageMsg:
 		if m.loading || m.syncing {
 			m.loadingStage = msg.stage
+			// 极窄终端下阶段文案换行可能改变状态块行数，按实际行数刷新列表
+			m.refreshListSize()
 		}
 		return m, nil
 	case indexedMsg:
-		// 启动同步/加载完成，刷新会话列表
-		if m.indexErr != nil {
-			m.finishSyncError(m.indexErr)
-			return m, nil
-		}
-		sessions, usages, err := loadTuiSessions(m.ctx, m.app, m.db, m.dir, m.agent)
-		if err != nil {
-			m.finishSyncError(err)
-			return m, nil
-		}
-		sel := ""
-		if it, ok := m.list.SelectedItem().(item); ok {
-			sel = it.sess.SessionID
-		}
-		m.sessions = sessions
-		m.usages = usages
-		m.list.SetItems(itemsOf(sessions, usages))
-		if sel != "" {
-			if idx := indexOf(itemsOf(sessions, usages), sel); idx >= 0 {
-				m.list.Select(idx)
-			}
-		}
-		m.loading = false
-		m.loadingErr = nil
-		m.syncErr = nil
-		m.syncing = false
+		return m, m.handleIndexedMsg(msg)
+	case hideSyncDoneMsg:
+		// 完成提示到时隐藏，列表高度随之恢复
+		m.syncDoneVisible = false
+		m.refreshListSize()
 		return m, nil
 	case tea.KeyMsg:
 		if m.detail != nil {
@@ -723,6 +622,41 @@ func (m *mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// handleIndexedMsg 处理同步完成：刷新列表、清理错误状态，
+// 并在后台同步场景依据真实计数差展示完成提示。
+func (m *mainModel) handleIndexedMsg(msg indexedMsg) tea.Cmd {
+	// 启动同步/加载完成，刷新会话列表
+	if m.indexErr != nil {
+		m.finishSyncError(m.indexErr)
+		return nil
+	}
+	sessions, usages, err := loadTuiSessions(m.ctx, m.app, m.db, m.dir, m.agent)
+	if err != nil {
+		m.finishSyncError(err)
+		return nil
+	}
+	sel := ""
+	if it, ok := m.list.SelectedItem().(item); ok {
+		sel = it.sess.SessionID
+	}
+	m.sessions = sessions
+	m.usages = usages
+	m.list.SetItems(itemsOf(sessions, usages))
+	if sel != "" {
+		if idx := indexOf(itemsOf(sessions, usages), sel); idx >= 0 {
+			m.list.Select(idx)
+		}
+	}
+	wasSyncing := m.syncing
+	m.loading = false
+	m.loadingErr = nil
+	m.syncErr = nil
+	m.syncing = false
+	m.applySyncDone(msg, wasSyncing)
+	m.refreshListSize()
+	return m.scheduleSyncDoneHide()
+}
+
 func (m *mainModel) finishSyncError(err error) {
 	if m.loading || len(m.sessions) == 0 {
 		m.loading = false
@@ -731,6 +665,9 @@ func (m *mainModel) finishSyncError(err error) {
 		m.syncErr = err
 	}
 	m.syncing = false
+	// 失败态与完成提示互斥：清理提示并按失败块实际行数重设列表高度
+	m.syncDoneVisible = false
+	m.refreshListSize()
 }
 
 func (m *mainModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -773,25 +710,12 @@ func (m *mainModel) View() string {
 }
 
 func (m *mainModel) listHeight(termHeight, termWidth int) int {
-	statusLines := 0
-	if m.syncing || m.syncErr != nil {
-		statusLines = 1
-	}
-	height := termHeight - 3 - keyHelpLineCount(m.keys.ShortHelp(), termWidth) - statusLines
+	height := termHeight - 3 - keyHelpLineCount(m.keys.ShortHelp(), termWidth) -
+		m.statusBlockLines(termWidth)
 	if height < 1 {
 		return 1
 	}
 	return height
-}
-
-func (m *mainModel) syncStatusView() string {
-	if m.syncErr != nil {
-		return errorStyle.Render(i18n.Trf("Showing cached sessions; sync failed: %v", "当前显示缓存会话；后台同步失败：%v", m.syncErr))
-	}
-	if m.syncing {
-		return loadingDimStyle.Render(m.spinner.View() + " " + i18n.Tr("Updating session index…", "正在后台更新会话索引…"))
-	}
-	return ""
 }
 
 func (m *mainModel) keyHelpView() string {

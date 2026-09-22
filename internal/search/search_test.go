@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -398,5 +399,83 @@ func TestByIDPrefixOrderByEndTime(t *testing.T) {
 	if res[0].Session.SessionID != "pfx_late" || res[1].Session.SessionID != "pfx_early" {
 		t.Fatalf("order: [%s, %s], want [pfx_late, pfx_early]",
 			res[0].Session.SessionID, res[1].Session.SessionID)
+	}
+}
+
+// TestSearchExcludeSubagents 验证 SQL 层子会话过滤：默认查询返回全部会话
+// （现有调用方如 talea list 在结果层自行按 IsSubagent 过滤，行为不变），
+// ExcludeSubagents=true 时仅返回主会话。
+func TestSearchExcludeSubagents(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	insertSession(t, db, mkSession("main-1", "主会话问题", "/home/alice/x", "opencode"))
+	sub := mkSession("sub-1", "You are a subagent spawned by another session", "/home/alice/x", "opencode")
+	sub.IsSubagent = true
+	insertSession(t, db, sub)
+
+	all, err := List(ctx, db, Query{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("默认查询行为必须不变（含子会话，由调用方过滤）, got %d 条", len(all))
+	}
+
+	mainOnly, err := List(ctx, db, Query{Limit: 10, ExcludeSubagents: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mainOnly) != 1 || mainOnly[0].Session.SessionID != "main-1" || mainOnly[0].Session.IsSubagent {
+		t.Fatalf("ExcludeSubagents 应仅返回主会话, got %+v", mainOnly)
+	}
+}
+
+// TestSearchUnlimited 验证 Unlimited 覆盖 Limit 截断，默认 LIMIT 语义保持不变。
+func TestSearchUnlimited(t *testing.T) {
+	ctx := context.Background()
+	db := newDB(t)
+	for i := 0; i < 5; i++ {
+		insertSession(t, db, mkSession(fmt.Sprintf("u-%d", i), "unlimited test", "/home/alice/x", "opencode"))
+	}
+
+	limited, err := List(ctx, db, Query{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("默认 Limit=2 仍应截断, got %d 条", len(limited))
+	}
+
+	all, err := List(ctx, db, Query{Limit: 2, Unlimited: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 5 {
+		t.Fatalf("Unlimited 应返回全部会话, got %d 条", len(all))
+	}
+}
+
+// TestLimitClause 锁定 Limit 语义：0/负数取默认上限而非“不限制”，
+// Unlimited 时不追加 LIMIT 子句。
+func TestLimitClause(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		q    Query
+		want int
+	}{
+		{name: "zero uses default", q: Query{}, want: defaultSearchLimit},
+		{name: "negative uses default", q: Query{Limit: -1}, want: defaultSearchLimit},
+		{name: "explicit limit", q: Query{Limit: 7}, want: 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sql, args := tc.q.limitClause()
+			if sql != " LIMIT ?" || len(args) != 1 || args[0] != tc.want {
+				t.Fatalf("limitClause(%+v) = %q %v, want LIMIT with %d", tc.q, sql, args, tc.want)
+			}
+		})
+	}
+	sql, args := Query{Unlimited: true}.limitClause()
+	if sql != "" || len(args) != 0 {
+		t.Fatalf("Unlimited 应不追加 LIMIT, got %q %v", sql, args)
 	}
 }

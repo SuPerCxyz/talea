@@ -15,17 +15,6 @@ import (
 	"github.com/talea/talea/internal/model"
 )
 
-// Query 描述搜索条件。
-type Query struct {
-	Term      string
-	Agent     string
-	Cwd       string
-	Project   string
-	Branch    string
-	SinceDays int
-	Limit     int
-}
-
 // dirPrefix 将目录过滤参数规范化为绝对路径。
 // 支持相对路径（./、../）与末尾斜杠：先解析为绝对路径，再清理，
 // 保证与索引中记录的绝对工作目录精确匹配一致。
@@ -195,11 +184,6 @@ func Rebuild(ctx context.Context, db *index.DB) error {
 
 // Search 执行全文搜索。
 func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
-	limit := q.Limit
-	if limit <= 0 {
-		limit = 200
-	}
-
 	var (
 		where []string
 		args  []any
@@ -235,6 +219,10 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		where = append(where, `s.last_activity_at >= ?`)
 		args = append(args, sinceEpoch(q.SinceDays))
 	}
+	if q.ExcludeSubagents {
+		// is_subagent 为 NOT NULL DEFAULT 0，直接等值过滤即可
+		where = append(where, `s.is_subagent = 0`)
+	}
 	if len(where) == 0 {
 		where = append(where, `1=1`)
 	}
@@ -245,6 +233,7 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 	// 内外顺序一致，不丢结束时间更新的会话。
 	orderBy := "COALESCE(s.ended_at, s.started_at, s.last_activity_at) DESC, s.rowid DESC"
 
+	limitSQL, limitArgs := q.limitClause()
 	query := fmt.Sprintf(`
 		SELECT s.agent_id, s.agent_instance_id, s.session_id,
 		       s.first_question, s.started_at, s.ended_at,
@@ -262,10 +251,9 @@ func Search(ctx context.Context, db *index.DB, q Query) ([]Result, error) {
 		LEFT JOIN session_usage u
 		       ON u.agent_instance_id = s.agent_instance_id AND u.session_id = s.session_id
 		WHERE %s
-		ORDER BY %s
-		LIMIT ?`,
-		strings.Join(where, " AND "), orderBy)
-	args = append(args, limit)
+		ORDER BY %s%s`,
+		strings.Join(where, " AND "), orderBy, limitSQL)
+	args = append(args, limitArgs...)
 
 	rows, err := db.SQL().QueryContext(ctx, query, args...)
 	if err != nil {

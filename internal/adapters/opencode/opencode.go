@@ -17,7 +17,6 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/talea/talea/internal/adapters"
-	"github.com/talea/talea/internal/adapters/extract"
 	"github.com/talea/talea/internal/model"
 )
 
@@ -145,47 +144,90 @@ func openRO(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-// Discover 发现数据库中的会话。
+// Discover 发现数据库中的会话；按表形态选择 session_v2 并集或传统 session。
 func (a *Adapter) Discover(ctx context.Context, inst model.AgentInstance) ([]adapters.SessionSource, error) {
-	dbPath := opencodeDatabasePath(ctx, inst)
-	return a.discoverQuery(ctx, dbPath,
-		`SELECT id, time_updated, coalesce(length(title),0) FROM session`)
+	return a.discoverAt(ctx, opencodeDatabasePath(ctx, inst), nil)
 }
 
 // DiscoverIncremental 只查询高水位附近可能变化的会话。
+// 游标携带建立时的存储形态；形态变化（含旧版无 shape 的游标）时旧高水位不再可信，
+// 忽略游标并回退一次完整发现，避免永久跳过新表中的历史会话。
 func (a *Adapter) DiscoverIncremental(
 	ctx context.Context,
 	inst model.AgentInstance,
 	state adapters.DiscoveryState,
 ) ([]adapters.SessionSource, adapters.DiscoveryState, error) {
 	dbPath := opencodeDatabasePath(ctx, inst)
+	shape := probeTablesAt(ctx, dbPath).shape()
 	if state.Cursor == "" {
-		sources, err := a.Discover(ctx, inst)
-		return sources, adapters.DiscoveryState{Cursor: a.CursorFromSources(inst, sources)}, err
+		return a.fullDiscoverState(ctx, inst, shape)
 	}
 	cur, err := decodeCursor(state.Cursor)
 	if err != nil {
 		return nil, adapters.DiscoveryState{}, err
 	}
-	cutoff := cur.TimeUpdated - cursorOverlapMillis
-	sources, err := a.discoverQuery(ctx, dbPath,
-		`SELECT id, time_updated, coalesce(length(title),0)
-		 FROM session WHERE time_updated >= ? ORDER BY time_updated ASC, id ASC`, cutoff)
+	if cur.Shape != shape {
+		// 一次性形态迁移补偿：数据源结构已迁移，旧高水位（或无 shape 的旧游标）
+		// 会过滤掉新表中时间戳更早的历史会话，忽略它并做一次完整发现。
+		return a.fullDiscoverState(ctx, inst, shape)
+	}
+	return a.incrementalDiscover(ctx, inst, dbPath, shape, cur)
+}
+
+// fullDiscoverState 执行完整发现，并返回携带存储形态的游标；
+// 无来源时保持空游标（与既有空游标语义一致），避免写出无法解码的游标。
+func (a *Adapter) fullDiscoverState(
+	ctx context.Context,
+	inst model.AgentInstance,
+	shape string,
+) ([]adapters.SessionSource, adapters.DiscoveryState, error) {
+	sources, err := a.Discover(ctx, inst)
 	if err != nil {
 		return nil, adapters.DiscoveryState{}, err
 	}
-	next := cur
-	for _, src := range sources {
-		candidate := sourceCursor{TimeUpdated: src.Mtime, SessionID: src.SessionID}
-		if candidate.after(next) {
-			next = candidate
-		}
+	max := cursorOfSources(sources, shape)
+	cursor := ""
+	if max.SessionID != "" {
+		cursor = encodeCursor(max)
+	}
+	return sources, adapters.DiscoveryState{Cursor: cursor}, nil
+}
+
+// incrementalDiscover 在形态一致时执行既有高水位增量发现（含 5 分钟重叠窗口）。
+func (a *Adapter) incrementalDiscover(
+	ctx context.Context,
+	inst model.AgentInstance,
+	dbPath string,
+	shape string,
+	cur sourceCursor,
+) ([]adapters.SessionSource, adapters.DiscoveryState, error) {
+	cutoff := cur.TimeUpdated - cursorOverlapMillis
+	// 高水位过滤施加在并集子查询外层，游标与 5 分钟重叠窗口语义保持不变。
+	sources, err := a.discoverAt(ctx, dbPath, &cutoff)
+	if err != nil {
+		return nil, adapters.DiscoveryState{}, err
+	}
+	next := cursorOfSources(sources, shape)
+	if cur.after(next) {
+		next = cur
 	}
 	return sources, adapters.DiscoveryState{Cursor: encodeCursor(next)}, nil
 }
 
 // CursorFromSources 返回来源列表中的最大 (time_updated, session_id)。
+// 刻意不携带 shape：该接口无 ctx、无法探测存储形态。这是保守降级——增量失败回退
+// 路径产生无 shape 游标时，下次增量会判定形态不匹配而做一次完整发现；而
+// DiscoverIncremental 写回的游标总是带 shape，因此不会死循环，也不会漏。
 func (a *Adapter) CursorFromSources(_ model.AgentInstance, sources []adapters.SessionSource) string {
+	max := cursorOfSources(sources, "")
+	if max.SessionID == "" {
+		return ""
+	}
+	return encodeCursor(max)
+}
+
+// cursorOfSources 返回来源列表中的最大游标，并写入指定存储形态（空串表示不携带形态）。
+func cursorOfSources(sources []adapters.SessionSource, shape string) sourceCursor {
 	var max sourceCursor
 	for _, src := range sources {
 		candidate := sourceCursor{TimeUpdated: src.Mtime, SessionID: src.SessionID}
@@ -193,10 +235,8 @@ func (a *Adapter) CursorFromSources(_ model.AgentInstance, sources []adapters.Se
 			max = candidate
 		}
 	}
-	if max.SessionID == "" {
-		return ""
-	}
-	return encodeCursor(max)
+	max.Shape = shape
+	return max
 }
 
 func encodeCursor(c sourceCursor) string {
@@ -207,6 +247,9 @@ func encodeCursor(c sourceCursor) string {
 type sourceCursor struct {
 	TimeUpdated int64  `json:"time_updated"`
 	SessionID   string `json:"session_id"`
+	// Shape 记录游标建立时的存储形态。形态变化说明数据源结构已迁移，
+	// 旧高水位不再可信，必须回退一次完整发现，否则会永久跳过新表中的历史会话。
+	Shape string `json:"shape,omitempty"`
 }
 
 func (c sourceCursor) after(other sourceCursor) bool {
@@ -214,6 +257,8 @@ func (c sourceCursor) after(other sourceCursor) bool {
 		(c.TimeUpdated == other.TimeUpdated && c.SessionID > other.SessionID)
 }
 
+// decodeCursor 解析游标；旧格式游标没有 shape 字段（值为 ""），属合法输入，
+// 不因此报错——形态不匹配的处理由 DiscoverIncremental 负责。
 func decodeCursor(raw string) (sourceCursor, error) {
 	var c sourceCursor
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {
@@ -261,12 +306,12 @@ func (a *Adapter) discoverQuery(ctx context.Context, dbPath, query string, args 
 	return out, rows.Err()
 }
 
-// sessionRow 对应 session 表。
+// sessionRow 对应 session / session_v2 两表共有的会话元数据列。
 type sessionRow struct {
 	ID               string
 	Directory        string
 	Path             sql.NullString
-	Title            string
+	Title            sql.NullString
 	ParentID         sql.NullString
 	Model            sql.NullString
 	Agent            sql.NullString
@@ -291,17 +336,9 @@ func (a *Adapter) ParseMetadata(
 	}
 	defer db.Close()
 
-	row := db.QueryRowContext(ctx,
-		`SELECT id, directory, path, title, parent_id, model, agent,
-		        tokens_input, tokens_output, tokens_reasoning,
-		        tokens_cache_read, tokens_cache_write,
-		        time_created, time_updated
-		 FROM session WHERE id = ?`, src.SessionID)
-
-	var s sessionRow
-	if err := row.Scan(&s.ID, &s.Directory, &s.Path, &s.Title, &s.ParentID,
-		&s.Model, &s.Agent, &s.TokensInput, &s.TokensOutput, &s.TokensReasoning,
-		&s.TokensCacheRead, &s.TokensCacheWrite, &s.TimeCreated, &s.TimeUpdated); err != nil {
+	// 元数据优先读 session_v2，表缺失或行缺失时回退传统 session。
+	s, err := scanSessionRow(ctx, db, src.SessionID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -337,9 +374,9 @@ func (a *Adapter) ParseMetadata(
 	if s.Agent.Valid && s.Agent.String != "" {
 		out.FormatVersion = s.Agent.String
 	}
-	if s.Title != "" && s.Title != "New session" {
+	if s.Title.Valid && s.Title.String != "" && s.Title.String != "New session" {
 		// title 为 Agent 自动生成标题，仅作为会话说明，不用于首次提问
-		_ = s.Title
+		_ = s.Title.String
 	}
 
 	// Token 汇总（会话级，完整）
@@ -387,115 +424,30 @@ func positiveToken(v sql.NullInt64) bool {
 	return v.Valid && v.Int64 > 0
 }
 
-// firstQuestion 读取最早 user 消息正文。
+// firstQuestion 读取最早 user 消息正文：按会话数据分流到传统或 v2 路径。
 func (a *Adapter) firstQuestion(ctx context.Context, db *sql.DB, sessionID string) (string, string, float64) {
-	row := db.QueryRowContext(ctx,
-		`SELECT m.id FROM message m
-		 WHERE m.session_id = ? AND json_extract(m.data, '$.role') = 'user'
-		 ORDER BY m.time_created ASC LIMIT 1`, sessionID)
-	var msgID string
-	if err := row.Scan(&msgID); err != nil {
-		return "", "none", 0
+	if useLegacyMessages(ctx, db, sessionID) {
+		return a.legacyFirstQuestion(ctx, db, sessionID)
 	}
-	rows, err := db.QueryContext(ctx,
-		`SELECT data FROM part WHERE message_id = ? ORDER BY time_created ASC`, msgID)
-	if err != nil {
-		return "", "none", 0
-	}
-	defer rows.Close()
-	var texts []string
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			continue
-		}
-		var p struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal([]byte(raw), &p); err != nil {
-			continue
-		}
-		if p.Type == "text" && p.Text != "" {
-			texts = append(texts, p.Text)
-		}
-	}
-	first, ok := extract.FirstNonInjected(texts)
-	if !ok {
-		return "", "user_message_no_text", 0
-	}
-	return first, "user_message", 1.0
+	return a.v2FirstQuestion(ctx, db, sessionID)
 }
 
-// LoadMessages 读取消息预览。
+// LoadMessages 读取消息预览：按会话数据分流到传统或 v2 路径。
 func (a *Adapter) LoadMessages(
 	ctx context.Context,
 	s model.Session,
 	opts adapters.MessageLoadOptions,
 ) (adapters.MessageIterator, error) {
-	db, err := openRO(s.SourcePath)
+	probe, err := openRO(s.SourcePath)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, time_created FROM message WHERE session_id = ? ORDER BY time_created ASC`, s.SessionID)
-	if err != nil {
-		db.Close()
-		return nil, err
+	legacy := useLegacyMessages(ctx, probe, s.SessionID)
+	probe.Close()
+	if legacy {
+		return a.loadLegacyMessages(ctx, s, opts)
 	}
-	type msgInfo struct {
-		ID   string
-		Time int64
-	}
-	var msgs []msgInfo
-	for rows.Next() {
-		var m msgInfo
-		if err := rows.Scan(&m.ID, &m.Time); err != nil {
-			continue
-		}
-		msgs = append(msgs, m)
-	}
-	rows.Close()
-	db.Close()
-
-	if opts.Limit > 0 && len(msgs) > opts.Limit {
-		msgs = msgs[len(msgs)-opts.Limit:]
-	}
-
-	// 重新打开数据库按需加载正文
-	db2, err := openRO(s.SourcePath)
-	if err != nil {
-		return nil, err
-	}
-	var out []adapters.Message
-	for _, m := range msgs {
-		var role string
-		db2.QueryRowContext(ctx, `SELECT json_extract(data,'$.role') FROM message WHERE id=?`, m.ID).Scan(&role)
-		pRows, err := db2.QueryContext(ctx, `SELECT data FROM part WHERE message_id=? ORDER BY time_created ASC`, m.ID)
-		if err != nil {
-			continue
-		}
-		var parts []string
-		for pRows.Next() {
-			var raw string
-			pRows.Scan(&raw)
-			var p struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}
-			if json.Unmarshal([]byte(raw), &p) == nil && p.Type == "text" {
-				parts = append(parts, p.Text)
-			}
-		}
-		pRows.Close()
-		out = append(out, adapters.Message{
-			Role:      role,
-			Timestamp: m.Time / 1000,
-			Content:   strings.Join(parts, "\n"),
-		})
-	}
-	db2.Close()
-	return &sliceIterator{msgs: out}, nil
+	return a.v2LoadMessages(ctx, s, opts)
 }
 
 type sliceIterator struct {
@@ -533,9 +485,7 @@ func (a *Adapter) LoadUsage(ctx context.Context, s model.Session) (*model.TokenU
 	return nil, nil
 }
 
-// IterateUsageEvents 从 message/part 表提取时间线事件。
-// user 消息生成 user_message 事件；step-finish 生成 request 事件（携带 tokens）。
-// source_identity 使用 message_id / part_id 保证幂等去重。
+// IterateUsageEvents 提取时间线事件：按会话数据分流到传统 message/part 或 v2 session_message。
 func (a *Adapter) IterateUsageEvents(
 	ctx context.Context,
 	s model.Session,
@@ -545,224 +495,15 @@ func (a *Adapter) IterateUsageEvents(
 		return nil, err
 	}
 	defer db.Close()
-
-	var events []*model.UsageTimelineEvent
-	seq := int64(0)
-
-	// 1) user 消息事件
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, time_created, json_extract(data, '$.role')
-		 FROM message WHERE session_id=? ORDER BY time_created ASC, id ASC`, s.SessionID)
-	if err != nil {
-		return nil, err
+	if useLegacyMessages(ctx, db, s.SessionID) {
+		return a.iterateLegacyUsageEvents(ctx, db, s)
 	}
-	for rows.Next() {
-		var (
-			msgID   string
-			created int64
-			role    string
-		)
-		if err := rows.Scan(&msgID, &created, &role); err != nil {
-			continue
-		}
-		if role != "user" {
-			continue
-		}
-		ts := time.UnixMilli(created)
-		preview := a.messagePreview(ctx, db, msgID)
-		events = append(events, &model.UsageTimelineEvent{
-			AgentInstanceID:   s.AgentInstanceID,
-			SessionID:         s.SessionID,
-			EventID:           "msg-" + msgID,
-			EventType:         model.UsageEventUserMessage,
-			Timestamp:         &ts,
-			Sequence:          seq,
-			MessageID:         msgID,
-			Source:            model.UsageSourceMessageMetadata,
-			Completeness:      model.UsageComplete,
-			UserPromptPreview: preview,
-			SourceIdentity:    "opencode-msg:" + msgID,
-		})
-		seq++
-	}
-	rows.Close()
-
-	// 2) step-finish request 事件
-	rows2, err := db.QueryContext(ctx,
-		`SELECT p.id, p.message_id, p.time_created, p.data
-		 FROM part p
-		 WHERE p.session_id = ?
-		 ORDER BY p.time_created ASC, p.id ASC`, s.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows2.Close()
-	for rows2.Next() {
-		var (
-			partID, msgID string
-			created       int64
-			raw           string
-		)
-		if err := rows2.Scan(&partID, &msgID, &created, &raw); err != nil {
-			continue
-		}
-		var p struct {
-			Type   string          `json:"type"`
-			Tokens json.RawMessage `json:"tokens"`
-			Tool   string          `json:"tool"`
-			CallID string          `json:"callID"`
-			State  json.RawMessage `json:"state"`
-			Auto   *bool           `json:"auto"`
-		}
-		if err := json.Unmarshal([]byte(raw), &p); err != nil {
-			continue
-		}
-		ts := time.UnixMilli(created)
-
-		// 明确压缩事件：compaction part（spec §14.6）
-		if p.Type == "compaction" {
-			ev := &model.UsageTimelineEvent{
-				AgentInstanceID: s.AgentInstanceID,
-				SessionID:       s.SessionID,
-				EventID:         partID,
-				EventType:       model.UsageEventCompactionStart,
-				Timestamp:       &ts,
-				Sequence:        seq,
-				MessageID:       msgID,
-				Source:          model.UsageSourceMessageMetadata,
-				Completeness:    model.UsageComplete,
-				SourceIdentity:  "opencode-compact:" + partID,
-				RawFields:       map[string]any{"auto": p.Auto != nil && *p.Auto},
-			}
-			events = append(events, ev)
-			seq++
-			continue
-		}
-
-		// 工具调用事件：tool part 生成 tool_start/tool_end
-		if p.Type == "tool" {
-			evType := model.UsageEventToolStart
-			filePath := ""
-			if len(p.State) > 0 {
-				var st struct {
-					Status string `json:"status"`
-					Input  struct {
-						FilePath string `json:"filePath"`
-					} `json:"input"`
-				}
-				if json.Unmarshal(p.State, &st) == nil {
-					if st.Status == "completed" {
-						evType = model.UsageEventToolEnd
-					}
-					filePath = st.Input.FilePath
-				}
-			}
-			ev := &model.UsageTimelineEvent{
-				AgentInstanceID: s.AgentInstanceID,
-				SessionID:       s.SessionID,
-				EventID:         partID,
-				EventType:       evType,
-				Timestamp:       &ts,
-				Sequence:        seq,
-				MessageID:       msgID,
-				ToolCallID:      p.CallID,
-				ToolName:        p.Tool,
-				FilePath:        filePath,
-				Source:          model.UsageSourceMessageMetadata,
-				Completeness:    model.UsageComplete,
-				SourceIdentity:  "opencode-tool:" + partID,
-			}
-			events = append(events, ev)
-			seq++
-			continue
-		}
-
-		if p.Type != "step-finish" {
-			continue
-		}
-		var tok struct {
-			Total     *int64 `json:"total"`
-			Input     *int64 `json:"input"`
-			Output    *int64 `json:"output"`
-			Reasoning *int64 `json:"reasoning"`
-		}
-		if err := json.Unmarshal(p.Tokens, &tok); err != nil {
-			continue
-		}
-		ts = time.UnixMilli(created)
-		ev := &model.UsageTimelineEvent{
-			AgentInstanceID: s.AgentInstanceID,
-			SessionID:       s.SessionID,
-			EventID:         partID,
-			EventType:       model.UsageEventRequest,
-			Timestamp:       &ts,
-			Sequence:        seq,
-			MessageID:       msgID,
-			Model:           a.messageModel(ctx, db, msgID),
-			InputTokens:     tok.Input,
-			OutputTokens:    tok.Output,
-			TotalTokens:     tok.Total,
-			ReasoningTokens: tok.Reasoning,
-			Source:          model.UsageSourceMessageMetadata,
-			Completeness:    model.UsageComplete,
-			SourceIdentity:  "opencode-part:" + partID,
-		}
-		// OpenCode step-finish total 为上下文快照（累计），
-		// input 为本次请求增量。将 total 映射为 ContextAfter 与 CumulativeTotal。
-		if tok.Total != nil {
-			ev.ContextAfter = tok.Total
-			ev.CumulativeTotal = tok.Total
-		}
-		events = append(events, ev)
-		seq++
-	}
-	return &eventIterator{events: events}, nil
+	return a.iterateV2UsageEvents(ctx, db, s)
 }
 
 // DetectActivity 检测会话活动状态（进程 + 文件更新时间）。
 func (a *Adapter) DetectActivity(ctx context.Context, s model.Session) (model.ActivityState, error) {
 	return adapters.ProcessActivityDetector{Executable: "opencode"}.DetectActivity(ctx, s)
-}
-
-// messageModel 从消息 data 提取模型名。
-func (a *Adapter) messageModel(ctx context.Context, db *sql.DB, msgID string) string {
-	var raw string
-	err := db.QueryRowContext(ctx,
-		`SELECT json_extract(data, '$.modelID') FROM message WHERE id=?`, msgID).Scan(&raw)
-	if err != nil || raw == "" {
-		return ""
-	}
-	return raw
-}
-
-// messagePreview 提取消息文本摘要。
-func (a *Adapter) messagePreview(ctx context.Context, db *sql.DB, msgID string) string {
-	rows, err := db.QueryContext(ctx,
-		`SELECT data FROM part WHERE message_id=? AND json_extract(data,'$.type')='text'
-		 ORDER BY time_created ASC`, msgID)
-	if err != nil {
-		return ""
-	}
-	defer rows.Close()
-	var texts []string
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			continue
-		}
-		var p struct {
-			Text string `json:"text"`
-		}
-		if json.Unmarshal([]byte(raw), &p) == nil && p.Text != "" {
-			texts = append(texts, p.Text)
-		}
-	}
-	joined := strings.Join(texts, "\n")
-	runes := []rune(joined)
-	if len(runes) > 200 {
-		return string(runes[:200])
-	}
-	return joined
 }
 
 type eventIterator struct {

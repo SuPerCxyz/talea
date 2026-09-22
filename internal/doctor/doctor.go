@@ -92,6 +92,7 @@ func Run(ctx context.Context, a *app.App, agentFilter string) (Report, error) {
 			}
 			rep.addOK(fmt.Sprintf("%s 会话发现", info.DisplayName),
 				fmt.Sprintf("%s 目录 %d 个会话", inst.DataDirectory, len(sources)))
+			addStorageShape(ctx, &rep, ad, info.DisplayName, inst, len(sources))
 		}
 	}
 
