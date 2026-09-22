@@ -577,8 +577,9 @@ var _ tea.Model = (*mainModel)(nil)
 
 func timePtr(t time.Time) *time.Time { return &t }
 
-// TestPaginationDotsApplied 回归：分页圆点样式必须真正应用到 Paginator，
-// 否则 bubbles list.New 的默认深灰圆点（#3C3C3C）在深色终端上几乎不可见。
+// TestPaginationDotsApplied 回归：分页字形样式必须真正应用到 Paginator
+// （否则 bubbles 默认深灰圆点在深色终端几乎不可见），且选中/未选中
+// 用字形（★/☆）+ 粗细 + 颜色三重区分，字形后跟 2 空格间隔。
 func TestPaginationDotsApplied(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
@@ -586,14 +587,26 @@ func TestPaginationDotsApplied(t *testing.T) {
 	a := &app.App{Registry: reg, Config: cfg, Paths: config.Paths{}}
 	m := newMain(ctx, a, []*model.Session{mkTuiSession("ses_1", "/home/user/nexora")}, nil, nil, "", "")
 
-	if !strings.Contains(m.list.Paginator.ActiveDot, "◆") {
-		t.Errorf("active dot should use the dot char, got %q", m.list.Paginator.ActiveDot)
+	active := m.list.Paginator.ActiveDot
+	inactive := m.list.Paginator.InactiveDot
+	if !strings.Contains(active, "★") || strings.Contains(active, "☆") {
+		t.Errorf("选中分页位应为实心 ★, got %q", active)
 	}
-	if !strings.Contains(m.list.Paginator.InactiveDot, "◆") {
-		t.Errorf("inactive dot should use the dot char, got %q", m.list.Paginator.InactiveDot)
+	if !strings.Contains(inactive, "☆") || strings.Contains(inactive, "★") {
+		t.Errorf("未选中分页位应为空心 ☆, got %q", inactive)
+	}
+	if active == inactive {
+		t.Error("选中与未选中必须使用不同字形")
+	}
+	// 分页字形后跟 2 空格间隔（pageDotGapCols）
+	if !strings.Contains(active, "★  ") {
+		t.Errorf("★ 后应有 2 空格间隔, got %q", active)
+	}
+	if !strings.Contains(inactive, "☆  ") {
+		t.Errorf("☆ 后应有 2 空格间隔, got %q", inactive)
 	}
 	// 无 TTY 测试环境下 lipgloss 不输出 ANSI 序列，这里断言样式配置本身：
-	// 当前页圆点须加粗突出，且与非当前页颜色不同。
+	// 当前页须加粗突出，且与非当前页颜色不同。
 	if !m.list.Styles.ActivePaginationDot.GetBold() {
 		t.Error("active dot should be bold to stand out")
 	}
@@ -602,8 +615,9 @@ func TestPaginationDotsApplied(t *testing.T) {
 	}
 }
 
-// TestPaginationDotsRender 验证：设置尺寸后，真实 View 渲染输出中包含
-// 自定义菱形分页指示（而非默认不可见深灰圆点）。
+// TestPaginationDotsRender 验证：设置尺寸后，真实 View 渲染输出的分页点阵
+// （Dots 分支，少量条目保证点阵放得下）同时含选中 ★ 与未选中 ☆、
+// 字形后 2 空格间隔，且不含旧菱形 ◆ 或 emoji 🌟。
 func TestPaginationDotsRender(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Default()
@@ -616,8 +630,51 @@ func TestPaginationDotsRender(t *testing.T) {
 	m := newMain(ctx, a, sessions, nil, nil, "", "")
 	m.list.SetSize(80, 30)
 	out := m.list.View()
-	if !strings.Contains(out, "◆") {
-		t.Errorf("pagination should render dots, got: %q", out)
+	if !strings.Contains(out, "★") || !strings.Contains(out, "☆") {
+		t.Errorf("分页点阵应同时含选中 ★ 与未选中 ☆, got: %q", out)
+	}
+	if !strings.Contains(out, "★  ") {
+		t.Errorf("点阵中 ★ 后应有 2 空格间隔, got: %q", out)
+	}
+	if strings.Contains(out, "◆") || strings.Contains(out, "🌟") {
+		t.Errorf("分页不得含 ◆/🌟, got: %q", out)
+	}
+}
+
+// TestStarSeparatorsInPaginationAndFooter 分页与页脚的星星字形（真实渲染输出）：
+// 分页用 ★（选中）/☆（未选中）双字形区分；页脚恒为实心 ★（无选中概念）；
+// 两处均不含旧菱形 ◆ 与 emoji 🌟。
+// 本断言推翻了旧版“分页渲染不得含 ☆”——最终方案规定未选中位改用空心 ☆。
+func TestStarSeparatorsInPaginationAndFooter(t *testing.T) {
+	ctx := context.Background()
+	a := &app.App{Registry: adapters.NewRegistry(), Config: config.Default(), Paths: config.Paths{}}
+	var sessions []*model.Session
+	for i := 0; i < 30; i++ {
+		sessions = append(sessions, mkTuiSession(fmt.Sprintf("star_%02d", i), "/home/user/nexora"))
+	}
+	m := newMain(ctx, a, sessions, nil, nil, "", "")
+	m.list.SetSize(80, 30)
+	page := m.list.View()
+	if !strings.Contains(page, "★") {
+		t.Errorf("分页选中位应含实心 ★, got: %q", page)
+	}
+	if !strings.Contains(page, "☆") {
+		t.Errorf("分页未选中位应含空心 ☆（推翻旧断言：☆ 现在必须出现）, got: %q", page)
+	}
+	if strings.Contains(page, "◆") || strings.Contains(page, "🌟") {
+		t.Errorf("分页不得含 ◆/🌟, got: %q", page)
+	}
+
+	m.width = 140
+	footer := m.keyHelpView()
+	if !strings.Contains(footer, "★") {
+		t.Errorf("页脚应含实心 ★, got: %q", footer)
+	}
+	if strings.Contains(footer, "☆") {
+		t.Errorf("页脚无选中概念，不得含空心 ☆, got: %q", footer)
+	}
+	if strings.Contains(footer, "◆") || strings.Contains(footer, "🌟") {
+		t.Errorf("页脚不得含 ◆/🌟, got: %q", footer)
 	}
 }
 
@@ -992,7 +1049,9 @@ func TestKeyboardHelpIsCompleteAndResponsive(t *testing.T) {
 		"[q]", "quit",
 	}
 
-	wide := renderKeyHelp(m.keys.ShortHelp(), 120)
+	// 页脚总宽 ≈ 93（按键项）+ 5×9（4空格+★+4空格）= 138 列：
+	// 分隔符 2→4 空格后 120 列已不足，140 列可容纳单行。
+	wide := renderKeyHelp(m.keys.ShortHelp(), 140)
 	if strings.Contains(wide, "\n") {
 		t.Fatalf("wide keyboard help should fit on one line, got %q", wide)
 	}
@@ -1022,17 +1081,68 @@ func TestKeyboardHelpIsCompleteAndResponsive(t *testing.T) {
 	assertLinesFit(t, veryNarrow, 20)
 }
 
-func TestKeyboardHelpUsesVisibleDiamondSeparators(t *testing.T) {
+func TestKeyboardHelpUsesVisibleStarSeparators(t *testing.T) {
 	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, nil, "", "")
 	out := renderKeyHelp(m.keys.ShortHelp(), 120)
 	if !strings.Contains(out, footerSeparator) {
 		t.Fatalf("keyboard help should contain %q, got %q", footerSeparator, out)
+	}
+	// 字面断言：不依赖常量本身，锁死 ★（非 ◆/☆/🌟）
+	if !strings.Contains(out, "★") {
+		t.Fatalf("keyboard help should contain star ★, got %q", out)
+	}
+	// 新间距：分隔符两侧各 4 空格（字面锁死 footerSepPadCols 生效）
+	if !strings.Contains(out, "    ★    ") {
+		t.Fatalf("keyboard help separator should have 4 spaces each side, got %q", out)
+	}
+	if strings.Contains(out, "◆") || strings.Contains(out, "☆") || strings.Contains(out, "🌟") {
+		t.Fatalf("keyboard help should not contain ◆/☆/🌟, got %q", out)
 	}
 	if strings.Contains(out, "•") {
 		t.Fatalf("keyboard help should not use the old bullet separator, got %q", out)
 	}
 	if !footerSeparatorStyle.GetBold() {
 		t.Fatal("footer separator should be bold")
+	}
+}
+
+// TestFooterSeparatorPaddingAndNarrowFit 页脚分隔符 4 空格间距常量生效；
+// 40 列窄终端页脚不横向溢出、keyHelpLineCount 与实际渲染行数一致，
+// listHeight 按页脚实际行数扣减（行数不硬编码）。
+func TestFooterSeparatorPaddingAndNarrowFit(t *testing.T) {
+	m := newMain(context.Background(), &app.App{Registry: adapters.NewRegistry(), Config: config.Default()}, nil, nil, nil, "", "")
+
+	// 间距常量生效（字面锁死两侧各 4 空格）
+	if wide := renderKeyHelp(m.keys.ShortHelp(), 140); !strings.Contains(wide, "    ★    ") {
+		t.Fatalf("页脚分隔符两侧应各 4 空格, got %q", wide)
+	}
+
+	const width, height = 40, 24
+	narrow := renderKeyHelp(m.keys.ShortHelp(), width)
+	assertLinesFit(t, narrow, width)
+	rows := strings.Count(narrow, "\n") + 1
+	if want := keyHelpLineCount(m.keys.ShortHelp(), width); rows != want {
+		t.Fatalf("keyHelpLineCount = %d, 实际渲染 %d 行", want, rows)
+	}
+
+	// listHeight 按页脚实际行数扣减（height-3-页脚行数，无状态条时）
+	m.width, m.height = width, height
+	if got, want := m.listHeight(height, width), height-3-rows; got != want {
+		t.Fatalf("listHeight(40) = %d, want height-3-页脚行数 = %d", got, want)
+	}
+	narrowList := m.listHeight(height, width)
+
+	m.width = 140
+	wideRows := keyHelpLineCount(m.keys.ShortHelp(), 140)
+	if wideRows >= rows {
+		t.Fatalf("40 列页脚应比 140 列占更多行: 140列=%d 行, 40列=%d 行", wideRows, rows)
+	}
+	wideList := m.listHeight(height, 140)
+	if got, want := wideList, height-3-wideRows; got != want {
+		t.Fatalf("listHeight(140) = %d, want %d", got, want)
+	}
+	if narrowList >= wideList {
+		t.Fatalf("页脚行数增加时列表高度应相应扣减: 40列列表=%d, 140列列表=%d", narrowList, wideList)
 	}
 }
 

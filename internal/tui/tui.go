@@ -112,13 +112,14 @@ func newListStyles() list.Styles {
 		Padding(0, 0, 1, 2)
 	st.PaginationStyle = lipgloss.NewStyle().PaddingLeft(2)
 	st.HelpStyle = lipgloss.NewStyle().Padding(1, 0, 0, 2)
+	// 选中/未选中 = 字形（★/☆）+ 粗细 + 颜色 三重区分，间隔 pageDotGapCols 空格。
 	st.ActivePaginationDot = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"}).
-		SetString(pageDot + " ")
+		SetString(pageDotActive + strings.Repeat(" ", pageDotGapCols))
 	st.InactivePaginationDot = lipgloss.NewStyle().
 		Foreground(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#9a9a9a"}).
-		SetString(pageDot + " ")
+		SetString(pageDotInactive + strings.Repeat(" ", pageDotGapCols))
 	st.DividerDot = lipgloss.NewStyle().
 		Foreground(subFG).
 		SetString(" " + bullet + " ")
@@ -128,10 +129,20 @@ func newListStyles() list.Styles {
 const (
 	// bullet 用于状态栏分隔点。
 	bullet = "•"
-	// pageDot 用于分页指示；当前页加粗高亮后更醒目。
-	pageDot = "◆"
-	// footerSeparator 用于快捷键提示之间的醒目分隔。
-	footerSeparator = "◆"
+	// pageDotActive 分页当前页字形：实心星星 ★（U+2605）。
+	pageDotActive = "★"
+	// pageDotInactive 分页非当前页字形：空心星星 ☆（U+2606）。
+	// ☆ 与 ★ 同属 Misc Symbols、同为 EastAsianWidth=A（当前 locale 均算 1 列），
+	// 宽度一致、不改变分页布局计算；主流 Linux 等宽字体
+	//（DejaVu/Noto Sans Mono/Ubuntu Mono/FreeMono）均覆盖两者。
+	pageDotInactive = "☆"
+	// pageDotGapCols 分页字形与其后相邻字形的间隔空格（列数）。
+	pageDotGapCols = 2
+	// footerSeparator 页脚快捷键提示之间的分隔：恒为实心星星 ★
+	//（页脚没有选中/未选中概念，不使用空心 ☆）。
+	footerSeparator = "★"
+	// footerSepPadCols 页脚分隔符两侧留白（列数），让星星与按键文字块分离。
+	footerSepPadCols = 4
 	// loadingCardMaxWidth 限制加载卡片宽度，避免宽屏中文案被拉得过散。
 	loadingCardMaxWidth = 64
 )
@@ -731,8 +742,9 @@ func keyHelpLineCount(bindings []key.Binding, width int) int {
 }
 
 func renderKeyHelp(bindings []key.Binding, width int) string {
-	separator := "  " + footerSeparatorStyle.Render(footerSeparator) + "  "
-	separatorWidth := lipgloss.Width(separator)
+	pad := strings.Repeat(" ", footerSepPadCols)
+	separator := pad + footerSeparatorStyle.Render(footerSeparator) + pad
+	separatorWidth := lipgloss.Width(separator) // 随常量自动跟随，行数由渲染推导
 	var lines []string
 	var line strings.Builder
 	lineWidth := 0

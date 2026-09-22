@@ -6,22 +6,27 @@
 
 ### Requirement: Background sync status SHALL be visually prominent
 
-存在缓存索引并执行后台同步时，TUI SHALL 在标题下方渲染醒目的同步状态块，使用边框或背景对比与普通列表文本区分，并显示真实同步阶段、spinner 与当前阶段说明。阶段语义 SHALL NOT 只依赖颜色。
+存在缓存索引并执行后台同步时，TUI SHALL 在标题下方渲染背景高亮的单行状态条，以背景色块 + 加粗与普通列表文本区分，并显示真实同步阶段、spinner 与当前阶段说明。阶段语义 SHALL NOT 只依赖颜色。
 
 #### Scenario: Sync in progress
 
 - **WHEN** Talea 启动后在后台同步会话索引
-- **THEN** 顶部 SHALL 显示带边框的同步状态块，其中包含 spinner、当前阶段标记与阶段说明，且视觉显著性高于普通列表文本
+- **THEN** 顶部 SHALL 显示背景高亮的单行状态条，其中包含 spinner、三阶段横向标记与当前阶段说明，且视觉显著性高于普通列表文本
 
 #### Scenario: Stage updates during sync
 
 - **WHEN** 后台同步进入下一阶段
-- **THEN** 状态块 SHALL 更新为新的当前阶段，已完成阶段保留完成标记
+- **THEN** 状态条 SHALL 更新为新的当前阶段，已完成阶段保留完成标记
 
 #### Scenario: Status block does not overflow the list
 
-- **WHEN** 同步状态块占据多行
-- **THEN** 会话列表可用高度 SHALL 扣除状态块实际行数，列表与底部快捷键提示不得被推出可视区域
+- **WHEN** 同步状态条显示时
+- **THEN** 会话列表可用高度 SHALL 按状态条实际渲染行数扣减，列表与底部快捷键提示不得被推出可视区域
+
+#### Scenario: Narrow terminal degrades to a single line
+
+- **WHEN** 状态条单行内容超出终端可用宽度（如 40 列）
+- **THEN** 进行中状态 SHALL 按「spinner + 当前阶段标记 + 当前阶段说明 → 总标题 → 三阶段明细」的优先级裁剪，完成/失败文案超宽时以省略号截断；任何档位 SHALL 保持单行，不换行、不横向溢出，且核心信息始终保留
 
 ### Requirement: Sync completion SHALL provide real feedback
 
