@@ -68,6 +68,28 @@ assistant 行 message 含额外字段：
 - content 为 string 时直接取；为数组时取各块 text 拼接。
 - 需过滤以 `<` 开头的系统提醒块（实测首条 user 内容为纯文本，未见注入块；但为兼容，保留过滤逻辑）。
 
+## 回合状态映射（Talea）
+
+适配器只读取状态相关字段，不保存消息正文：
+
+| 最后有效事件 | 通用状态 | 来源 |
+|-------------|---------|------|
+| `assistant.message.stop_reason=end_turn` / `stop_sequence` | completed | native |
+| `system.subtype=turn_duration` | completed | native |
+| `assistant` 含 `tool_use` 块或 `stop_reason=tool_use` / `pause_turn` | working | native |
+| `user` 消息或普通 `assistant` 消息 | working | inferred |
+| `isApiErrorMessage=true` 或 `stop_reason=max_tokens` / `refusal` | failed | native |
+| 无有效回合事件（如仅 `permission-mode` / `summary`） | unknown | unknown |
+
+说明：
+
+- `stop_reason` 位于 assistant 行的 `message.stop_reason`；该字段在旧版本或部分模型下
+  可能缺失，缺失时不推断为完成。
+- `turn_duration` 的完整结构尚未在本机样本中单独采样；Talea 仅在
+  `type=system && subtype=turn_duration` 时识别。
+- Claude 的权限等待不会写入会话记录，精确识别需要用户显式配置 hooks（见
+  `docs/status.md`）。
+
 ## Token 字段含义
 
 - `usage.input_tokens` 为**累计上下文值**（实测 2026-08-05：多个会话单调递增，

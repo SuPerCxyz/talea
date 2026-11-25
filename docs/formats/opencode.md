@@ -166,6 +166,26 @@ data TEXT   -- JSON
 `state.status == "completed"` 判定结束，`state.input.filePath` 提供文件路径，
 块级 `id` 为工具调用 ID（`call_...`），`name` 为工具名。
 
+## 回合状态映射（Talea）
+
+元数据解析会读取 `session_v2.time_idle` / `idle_outcome`（传统表无这两列）以及消息
+路径的最后一条记录：
+
+1. 最新 `session_message` 为 `type=idle`：按 `data.outcome`（兼容 `status`/`state`）
+   映射；`succeeded` → completed，`failed`/`error` → failed，
+   `interrupted`/`cancelled`/`aborted` → interrupted，其他/缺失 → idle。
+2. `time_idle` 不早于最后一条消息：按 `idle_outcome` 映射（同上）。
+3. 最后一条为 `user`/`assistant`（v2 或传统 `message` 路径）：working（推断）。
+4. 没有消息也没有 idle 记录：unknown。
+
+说明：
+
+- `idle_outcome` 的取值集合尚未在真实数据中穷尽枚举；未识别的值按 idle 处理，
+  不会误报为完成。
+- `time_idle` / `idle_outcome` 的语义基于列名与实测表结构推断，仍需更多样本确认。
+- 权限等待不会从数据库精确识别，需要用户可选配置 OpenCode plugin 调用
+  `talea hook`（见 `docs/status.md`）。
+
 ## 消息读取分流规则
 
 按**会话数据**而不是表存在性分流：

@@ -197,6 +197,20 @@ func (db *DB) Migrate(ctx context.Context) error {
 				cursor TEXT,
 				updated_at INTEGER NOT NULL
 			)`,
+		`CREATE TABLE IF NOT EXISTS session_turn_state (
+			agent_instance_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			turn_state TEXT NOT NULL DEFAULT 'unknown',
+			state_at INTEGER,
+			state_source TEXT NOT NULL DEFAULT 'unknown',
+			state_detail TEXT,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (agent_instance_id, session_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_turn_state_state
+			ON session_turn_state (turn_state)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_turn_state_state_at
+			ON session_turn_state (state_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS session_meta (
 			agent_instance_id TEXT NOT NULL,
 			session_id TEXT NOT NULL,
@@ -304,7 +318,13 @@ func (db *DB) InsertIfNew(ctx context.Context, s *model.Session) (bool, error) {
 		return false, err
 	}
 	n, _ := res.RowsAffected()
-	return n > 0, nil
+	if n == 0 {
+		return false, nil
+	}
+	if err := writeTurnState(ctx, db.sql, s, time.Now().Unix()); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 // UpsertSession 写入或更新会话。调用方负责在事务内使用（或直接调用）。
@@ -374,6 +394,9 @@ func (db *DB) UpsertSession(ctx context.Context, s *model.Session) error {
 		boolInt(s.HasTokenUsage), resumeLaunchArgsJSON(s.ResumeLaunchArgs), s.IndexedAt.Unix(), s.UpdatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("写入会话 %s/%s: %w", s.AgentInstanceID, s.SessionID, err)
+	}
+	if err := writeTurnState(ctx, db.sql, s, time.Now().Unix()); err != nil {
+		return err
 	}
 	if s.TokenUsage != nil {
 		return db.UpsertUsage(ctx, s)

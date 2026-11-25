@@ -116,7 +116,8 @@ talea --agent opencode        # 仅列出指定 Agent 的会话
 talea --path /p --agent codex # 两个过滤可组合
 ```
 
-- 会话固定按结束时间倒序排列（最新在前），不受配置 `default_sort` 影响。
+- 会话固定按结束时间倒序排列（最新在前），不受配置 `default_sort` 影响；
+  过滤结果保持同样的结束时间倒序。
 - `↑` / `↓` 选择，`Enter` 恢复，`d` 详情，`o` 在详情页恢复，`/` 过滤
   （输入后按 `Enter` 应用过滤，之后按 `Enter`/`o` 进入），`q` 退出。
 - 详情页聚合展示：会话信息（双列）、第一次提问、用户轮次（`t` 键展开/收起）、
@@ -124,12 +125,31 @@ talea --path /p --agent codex # 两个过滤可组合
   Token 汇总、子 Agent 会话。
 - 新会话自动出现——TUI 后台自动增量索引，无需手动执行。
 
+### Agent 活动看板
+
+```sh
+talea dashboard    # 常驻看板，每 3 秒增量刷新
+talea status       # 一次性文本状态
+talea status --short
+talea status --json
+```
+
+看板按**需要你 / 进行中 / 已完成（本轮结束）/ 失败或中断 / 空闲 / 未知**分组并显示
+计数；`Enter`/`d` 进入现有详情页，`o` 恢复会话，`↑/↓` 或 `j/k` 选择，`/` 过滤，
+`q` 退出。
+
+> “已完成”表示**当前回合结束、Agent 正在等待下一步输入**，不代表语义任务已经完成。
+> 阈值、JSON 字段以及可选的 Claude hooks / OpenCode plugin 配置片段见
+> [`docs/status.md`](docs/status.md)。
+
 ## 命令参考
 
 | 命令 | 说明 |
 |------|------|
 | `talea` | 打开 TUI（`--path` 精确匹配指定目录；`--agent` 按 Agent 过滤；支持 `./`、`../` 等并可组合） |
 | `talea list` | 列出会话（`--agent/--path/--project/--branch/--today/--active/--sort/--limit/--format`） |
+| `talea dashboard` | 常驻 Agent 活动看板（按回合状态分组、自动刷新） |
+| `talea status` | 当前回合状态（`--short`、`--json`） |
 | `talea go [session-id]` | 按完整/前缀 ID 恢复，或交互式选择（`--path/--target/--dry-run`） |
 | `talea index` | 增量索引（`--rebuild/--metadata-only`） |
 | `talea doctor` | 环境诊断（`--json/--agent`） |
@@ -141,6 +161,12 @@ talea --path /p --agent codex # 两个过滤可组合
 
 精确值 / 估算值 / 未知值严格区分——缺失显示「未知」而非 0。时间线事件按
 `source_identity` 去重；子 Agent Token 独立保存，默认不合并到主会话。
+
+回合状态默认只读推断：Claude Code / Codex / OpenCode 的会话记录会映射为进行中、
+等待输入、已完成、失败、中断、空闲或未知。Agent 未落盘的权限等待可通过可选的
+`talea hook` 精确上报；Talea 不会自动安装或修改任何 Agent 配置。事件文件
+`${XDG_DATA_HOME:-~/.local/share}/talea/status-events.jsonl` 仅在用户配置的 hook
+写入时创建，文件权限 0600、目录 0700。
 
 ## 界面语言
 

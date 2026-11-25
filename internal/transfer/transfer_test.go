@@ -43,7 +43,11 @@ func TestExportImportRoundTrip(t *testing.T) {
 			TotalTokens: &in,
 			InputTokens: &in,
 		},
-		HasTokenUsage: true,
+		HasTokenUsage:   true,
+		TurnState:       model.TurnStateWaitingInput,
+		TurnStateAt:     &now,
+		TurnStateSource: model.TurnStateSourceHook,
+		TurnStateDetail: "permission_prompt",
 	}
 	if err := db.UpsertSession(ctx, s); err != nil {
 		t.Fatal(err)
@@ -77,6 +81,14 @@ func TestExportImportRoundTrip(t *testing.T) {
 	m, _ := tags.Get(ctx, db2, "i", "s1")
 	if !m.Favorite || len(m.Tags) != 1 {
 		t.Fatalf("meta=%+v", m)
+	}
+	states, err := db2.LoadTurnStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := states[model.TurnStateKey("i", "s1")]; rec.State != model.TurnStateWaitingInput ||
+		rec.Source != model.TurnStateSourceHook || rec.Detail != "permission_prompt" {
+		t.Fatalf("导入回合状态=%+v", rec)
 	}
 
 	// 重复导入跳过

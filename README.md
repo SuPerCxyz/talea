@@ -121,7 +121,7 @@ talea --path /p --agent codex # combine both filters
 ```
 
 - Sessions are always sorted by end time (newest first), independent of
-  `default_sort` in the config.
+  `default_sort` in the config. Filtered results keep the same end-time order.
 - `↑` / `↓` select, `Enter` resume, `d` open details, `o` resume from details,
   `/` filter (type then `Enter` to apply, then `Enter`/`o` to enter), `q` quit.
 - The detail page aggregates: session info (two-column layout), first question,
@@ -130,12 +130,32 @@ talea --path /p --agent codex # combine both filters
   sub-agent sessions.
 - New sessions appear automatically — the TUI re-indexes in the background.
 
+### Activity dashboard
+
+```sh
+talea dashboard    # live board, incremental refresh every 3 seconds
+talea status       # one-shot text status
+talea status --short
+talea status --json
+```
+
+The dashboard groups sessions into **Needs you / Working / Completed (turn ended) /
+Failed or interrupted / Idle / Unknown**, shows counts, and lets you open the existing
+detail page (`Enter`/`d`) or resume (`o`). `↑/↓` or `j/k` select, `/` filters, `q` quits.
+
+> "Completed" means **the current turn ended and the agent is waiting for the next
+> step**. It is not a claim that the semantic task is finished. See
+> [`docs/status.md`](docs/status.md) for thresholds, JSON fields, and optional Claude
+> hooks / OpenCode plugin snippets.
+
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
 | `talea` | Open the TUI (`--path` restricts to an exact directory, no subdirs; `--agent` filters by agent; both accept `./`, `../` etc. and can be combined) |
 | `talea list` | List sessions (`--agent/--path/--project/--branch/--today/--active/--sort/--limit/--format`) |
+| `talea dashboard` | Live agent activity dashboard (grouped turn status, auto-refresh) |
+| `talea status` | Current turn status (`--short`, `--json`) |
 | `talea go [session-id]` | Resume a session by full/prefix ID, or pick interactively (`--path/--target/--dry-run`) |
 | `talea index` | Incremental index (`--rebuild/--metadata-only`) |
 | `talea doctor` | Environment diagnostics (`--json/--agent`) |
@@ -148,6 +168,13 @@ Output formats: `--format table|json|jsonl|csv|markdown`.
 Exact / estimated / unknown token values are kept strictly distinct — missing data shows
 `unknown`, never `0`. Timeline events are deduplicated by `source_identity`; sub-agent
 tokens are stored separately and never merged into the parent session by default.
+
+Turn status is read-only by default. Claude Code / Codex / OpenCode records are mapped
+to working, waiting, completed, failed, interrupted, idle or unknown. Permission waits
+that agents do not persist can be reported precisely through the optional `talea hook`
+bridge; Talea never installs or edits agent hooks/config automatically. The event file
+`${XDG_DATA_HOME:-~/.local/share}/talea/status-events.jsonl` is created only when a
+configured hook writes to it, with file mode `0600` and directory mode `0700`.
 
 ## i18n
 

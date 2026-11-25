@@ -15,6 +15,7 @@ import (
 	"github.com/talea/talea/internal/adapters"
 	"github.com/talea/talea/internal/app"
 	"github.com/talea/talea/internal/index"
+	"github.com/talea/talea/internal/status"
 )
 
 // Level 诊断级别。
@@ -109,6 +110,7 @@ func Run(ctx context.Context, a *app.App, agentFilter string) (Report, error) {
 
 	// 配置与路径映射检查
 	checkConfig(ctx, a, &rep)
+	checkStatusEvents(a, &rep)
 
 	sort.Slice(rep.Checks, func(i, j int) bool {
 		if rep.Checks[i].Agent != rep.Checks[j].Agent {
@@ -186,6 +188,25 @@ func checkConfig(ctx context.Context, a *app.App, rep *Report) {
 	} else {
 		rep.addOK("配置", a.Paths.ConfigPath)
 	}
+}
+
+// checkStatusEvents 提示可选 hook 事件文件；不创建、不修改任何 Agent 配置。
+func checkStatusEvents(a *app.App, rep *Report) {
+	path := filepath.Join(a.Paths.DataDir, status.EventFileName)
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			rep.addOK("可选状态事件", "未配置（可运行 talea hook 接收 Claude hooks / OpenCode plugin 事件）")
+			return
+		}
+		rep.addWarn("可选状态事件", err.Error())
+		return
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		rep.addWarn("可选状态事件", fmt.Sprintf("权限非 0600：%s", info.Mode().Perm().String()))
+		return
+	}
+	rep.addOK("可选状态事件", fmt.Sprintf("%s（%d 字节）", path, info.Size()))
 }
 
 func (r *Report) addOK(agent, text string) {

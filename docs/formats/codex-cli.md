@@ -63,6 +63,27 @@ assistant 消息含 `internal_chat_message_metadata_passthrough` 等字段。
 
 注意：`total_token_usage` 为会话**累计值**，`last_token_usage` 为**单次增量**（已实测确认，2026-08-05）。
 
+## 回合状态映射（Talea）
+
+从 `event_msg.payload.type` 与最后一条 `response_item.message` 提取通用状态：
+
+| 事件 | 通用状态 | 来源 |
+|------|---------|------|
+| `task_started` / `turn_started` | working | native |
+| `task_complete` / `turn_complete` | completed | native |
+| `turn_aborted`（reason 含 error/fail） | failed | native |
+| `turn_aborted`（其他 reason） | interrupted | native |
+| `exec_approval_request` / `apply_patch_approval_request` / `request_user_input` 等审批事件 | waiting_input | native |
+| `error` / `stream_error` | failed | native |
+| `response_item.message`（user/assistant） | working | inferred |
+| 无上述事件 | unknown | unknown |
+
+说明：
+
+- 审批事件名随 Codex 版本变化；Talea 只识别已列入白名单的名称，未识别的事件忽略并
+  回退到推断状态，不猜测为等待。
+- 不读取消息正文用于状态判断。
+
 ## 字段可用性
 
 | 字段 | 状态 |

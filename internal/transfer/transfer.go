@@ -37,6 +37,11 @@ type ExportSession struct {
 
 // Export 导出全部会话到文件。
 func Export(ctx context.Context, db *index.DB, outPath string) error {
+	// 回合状态在独立表中，先批量加载再按 (instance, session) 合并。
+	states, stateErr := db.LoadTurnStates(ctx)
+	if stateErr != nil {
+		states = nil
+	}
 	rows, err := db.SQL().QueryContext(ctx, `
 		SELECT agent_id, agent_instance_id, session_id,
 		       first_question, first_question_source, first_question_confidence,
@@ -93,6 +98,12 @@ func Export(ctx context.Context, db *index.DB, outPath string) error {
 			s.FirstQuestionConfidence = fqConf.Float64
 		}
 		s.WorkingDirSource = wdSource
+		if rec, ok := states[model.TurnStateKey(s.AgentInstanceID, s.SessionID)]; ok {
+			s.TurnState = rec.State
+			s.TurnStateAt = rec.StateAt
+			s.TurnStateSource = rec.Source
+			s.TurnStateDetail = rec.Detail
+		}
 		if resumeArgs != "" && resumeArgs != "null" {
 			_ = json.Unmarshal([]byte(resumeArgs), &s.ResumeLaunchArgs)
 		}

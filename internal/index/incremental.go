@@ -186,6 +186,9 @@ func (t *txIndex) upsertSession(ctx context.Context, s *model.Session) (bool, er
 		return false, err
 	}
 	_, _ = res.RowsAffected()
+	if terr := writeTurnState(ctx, t.tx, s, time.Now().Unix()); terr != nil {
+		return false, terr
+	}
 	if s.TokenUsage != nil {
 		if uerr := t.upsertUsage(ctx, s); uerr != nil {
 			return false, uerr

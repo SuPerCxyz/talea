@@ -39,12 +39,13 @@ internal/
   security/                # 脱敏、ANSI 清理、路径安全
   timeline/                # Token 时间线聚合、时间桶、用户轮次
   usage/                   # Token 汇总、去重、子 Agent 聚合
+  status/                  # 回合状态聚合、状态事件文件、status 输出
   doctor/                  # 环境诊断
   app/                     # 业务编排（与 TUI 分离）
   cli/                     # cobra 命令
   tui/                     # Bubble Tea 界面
   version/
-docs/                      # 架构、隐私、token、格式文档
+docs/                      # 架构、隐私、token、状态、格式文档
 testdata/{claude,codex}/   # 脱敏测试夹具（opencode 测试动态生成 DB，无静态夹具）
 ```
 

@@ -322,6 +322,9 @@ type sessionRow struct {
 	TokensCacheWrite sql.NullInt64
 	TimeCreated      int64
 	TimeUpdated      int64
+	// 以下列仅 session_v2 提供；传统表为零值。
+	TimeIdle    sql.NullInt64
+	IdleOutcome sql.NullString
 }
 
 // ParseMetadata 解析单个会话元数据。
@@ -405,8 +408,12 @@ func (a *Adapter) ParseMetadata(
 		out.TokenUsage = u
 	}
 
-	// 首次提问：读取最早 user 消息的 text part
-	out.FirstQuestion, out.FirstQuestionSource, out.FirstQuestionConfidence = a.firstQuestion(ctx, db, s.ID)
+	// 消息路径（传统 message 表或 v2 session_message）只探测一次。
+	legacyMessages := useLegacyMessages(ctx, db, s.ID)
+	out.FirstQuestion, out.FirstQuestionSource, out.FirstQuestionConfidence =
+		a.firstQuestionFor(ctx, db, s.ID, legacyMessages)
+	out.TurnState, out.TurnStateAt, out.TurnStateSource, out.TurnStateDetail =
+		a.turnState(ctx, db, s, legacyMessages)
 
 	out.UpdatedAt = time.Now()
 	return out, nil
@@ -424,9 +431,9 @@ func positiveToken(v sql.NullInt64) bool {
 	return v.Valid && v.Int64 > 0
 }
 
-// firstQuestion 读取最早 user 消息正文：按会话数据分流到传统或 v2 路径。
-func (a *Adapter) firstQuestion(ctx context.Context, db *sql.DB, sessionID string) (string, string, float64) {
-	if useLegacyMessages(ctx, db, sessionID) {
+// firstQuestionFor 读取最早 user 消息正文：按会话数据分流到传统或 v2 路径。
+func (a *Adapter) firstQuestionFor(ctx context.Context, db *sql.DB, sessionID string, legacy bool) (string, string, float64) {
+	if legacy {
 		return a.legacyFirstQuestion(ctx, db, sessionID)
 	}
 	return a.v2FirstQuestion(ctx, db, sessionID)

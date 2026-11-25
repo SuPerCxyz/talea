@@ -162,7 +162,36 @@ func scanSessionRow(ctx context.Context, db *sql.DB, sessionID string) (sessionR
 }
 
 // querySessionRow 从指定会话表读取一行元数据；表名仅来自本包常量。
+// session_v2 额外读取 time_idle / idle_outcome 用于回合状态判断。
 func querySessionRow(ctx context.Context, db *sql.DB, table, sessionID string) (sessionRow, error) {
+	if table == tableSessionV2 {
+		s, err := querySessionV2Row(ctx, db, sessionID)
+		if err == nil {
+			return s, nil
+		}
+		// 旧版 session_v2 可能没有 time_idle/idle_outcome 列；回退到公共列，
+		// 回合状态仍可通过消息路径推断。
+		return querySessionCommonRow(ctx, db, table, sessionID)
+	}
+	return querySessionCommonRow(ctx, db, table, sessionID)
+}
+
+func querySessionV2Row(ctx context.Context, db *sql.DB, sessionID string) (sessionRow, error) {
+	var s sessionRow
+	err := db.QueryRowContext(ctx,
+		`SELECT `+sessionMetaColumns+`, time_idle, idle_outcome
+		 FROM `+tableSessionV2+` WHERE id = ?`, sessionID).
+		Scan(&s.ID, &s.Directory, &s.Path, &s.Title, &s.ParentID,
+			&s.Model, &s.Agent, &s.TokensInput, &s.TokensOutput, &s.TokensReasoning,
+			&s.TokensCacheRead, &s.TokensCacheWrite, &s.TimeCreated, &s.TimeUpdated,
+			&s.TimeIdle, &s.IdleOutcome)
+	if err != nil {
+		return sessionRow{}, err
+	}
+	return s, nil
+}
+
+func querySessionCommonRow(ctx context.Context, db *sql.DB, table, sessionID string) (sessionRow, error) {
 	var s sessionRow
 	err := db.QueryRowContext(ctx,
 		`SELECT `+sessionMetaColumns+` FROM `+table+` WHERE id = ?`, sessionID).

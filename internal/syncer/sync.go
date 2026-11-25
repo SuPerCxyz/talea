@@ -33,8 +33,31 @@ func Sync(ctx context.Context, a *app.App, db *index.DB) error {
 	return SyncWithProgress(ctx, a, db, nil)
 }
 
+// Report 汇总一次同步中每个 Agent 的结果与错误。
+type Report struct {
+	Results []index.Result
+}
+
+// Warnings 返回按 Agent 汇总的错误提示。
+func (r Report) Warnings() []string {
+	var out []string
+	for _, result := range r.Results {
+		for _, msg := range result.ErrorMsgs {
+			out = append(out, string(result.AgentID)+": "+msg)
+		}
+	}
+	return out
+}
+
 // SyncWithProgress 执行同步并在真实阶段切换时调用 progress。
 func SyncWithProgress(ctx context.Context, a *app.App, db *index.DB, progress ProgressFunc) error {
+	_, err := SyncWithReport(ctx, a, db, progress)
+	return err
+}
+
+// SyncWithReport 执行同步，并在失败可容忍时返回逐 Agent 结果供界面提示。
+// 单个 Agent 的错误由 Indexer 汇总到 Results，不中止其他 Agent。
+func SyncWithReport(ctx context.Context, a *app.App, db *index.DB, progress ProgressFunc) (Report, error) {
 	report(progress, StageDetecting)
 	ix := &index.Indexer{
 		App: a,
@@ -47,11 +70,11 @@ func SyncWithProgress(ctx context.Context, a *app.App, db *index.DB, progress Pr
 	}
 	results, err := ix.Run(ctx)
 	if err != nil {
-		return err
+		return Report{}, err
 	}
 	report(progress, StagePreparing)
 	if err := search.Ensure(ctx, db); err != nil {
-		return err
+		return Report{Results: results}, err
 	}
 	changed := false
 	for _, result := range results {
@@ -61,17 +84,17 @@ func SyncWithProgress(ctx context.Context, a *app.App, db *index.DB, progress Pr
 	if !needFTS {
 		needFTS, err = search.NeedsPopulate(ctx, db)
 		if err != nil {
-			return err
+			return Report{Results: results}, err
 		}
 	}
 	if needFTS {
 		if err := search.Populate(ctx, db); err != nil {
-			return err
+			return Report{Results: results}, err
 		}
 	}
 	// 重新检测活动状态（进程运行中/最近更新），保证读取时状态准确
 	_, _ = ix.RefreshActivities(ctx)
-	return nil
+	return Report{Results: results}, nil
 }
 
 func report(progress ProgressFunc, stage Stage) {

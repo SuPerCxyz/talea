@@ -123,6 +123,12 @@ type Session struct {
 
 	Activity ActivityState `json:"activity_state"`
 
+	// 最近一轮的通用回合状态；由适配器从 Agent 原生记录映射。
+	TurnState       TurnState       `json:"turn_state,omitempty"`
+	TurnStateAt     *time.Time      `json:"turn_state_at,omitempty"`
+	TurnStateSource TurnStateSource `json:"turn_state_source,omitempty"`
+	TurnStateDetail string          `json:"turn_state_detail,omitempty"`
+
 	SourcePath   string `json:"source_path"`
 	SourceID     string `json:"source_id"`
 	SourceMtime  int64  `json:"source_mtime"`

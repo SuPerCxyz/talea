@@ -188,6 +188,7 @@ func (a *Adapter) ParseMetadata(
 		requestCount     int64
 		approvalPolicy   string
 		sandboxMode      string
+		turn             turnSnapshot
 	)
 	for {
 		o, ok, err := r.Next()
@@ -266,13 +267,22 @@ func (a *Adapter) ParseMetadata(
 			if item.Role == "user" {
 				s.UserMessageCount++
 			}
+			if item.Type == "message" && (item.Role == "user" || item.Role == "assistant") {
+				turn.apply(model.TurnStateWorking, model.TurnStateSourceInferred,
+					item.Role+" message", ts, hasTS)
+			}
+		}
+		if line.Type == "error" {
+			turn.apply(model.TurnStateFailed, model.TurnStateSourceNative, "session error", ts, hasTS)
 		}
 		if line.Type == "event_msg" {
 			var ev struct {
-				Type string          `json:"type"`
-				Info json.RawMessage `json:"info"`
+				Type   string          `json:"type"`
+				Reason string          `json:"reason"`
+				Info   json.RawMessage `json:"info"`
 			}
 			_ = json.Unmarshal(line.Payload, &ev)
+			applyCodexEvent(&turn, ev.Type, ev.Reason, ts, hasTS)
 			if ev.Type == "token_count" {
 				total, _ := parseTokenCount(ev.Info)
 				if total != nil && total.InputTokens != nil && *total.InputTokens > 0 {
@@ -288,6 +298,15 @@ func (a *Adapter) ParseMetadata(
 			}
 		}
 	}
+
+	if turn.state == "" {
+		turn.state = model.TurnStateUnknown
+		turn.source = model.TurnStateSourceUnknown
+	}
+	s.TurnState = turn.state
+	s.TurnStateAt = turn.at
+	s.TurnStateSource = turn.source
+	s.TurnStateDetail = turn.detail
 
 	if s.SessionID == "" {
 		s.SessionID = sessionIDFromFilename(src.Path)

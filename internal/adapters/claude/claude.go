@@ -143,13 +143,15 @@ func (a *Adapter) Discover(ctx context.Context, inst model.AgentInstance) ([]ada
 
 // jsonLine 是 JSONL 行的宽松结构。
 type jsonLine struct {
-	Type           string          `json:"type"`
-	Timestamp      string          `json:"timestamp"`
-	Cwd            string          `json:"cwd"`
-	SessionID      string          `json:"sessionId"`
-	GitBranch      string          `json:"gitBranch"`
-	PermissionMode string          `json:"permissionMode"`
-	Message        json.RawMessage `json:"message"`
+	Type              string          `json:"type"`
+	Subtype           string          `json:"subtype"`
+	Timestamp         string          `json:"timestamp"`
+	Cwd               string          `json:"cwd"`
+	SessionID         string          `json:"sessionId"`
+	GitBranch         string          `json:"gitBranch"`
+	PermissionMode    string          `json:"permissionMode"`
+	IsAPIErrorMessage bool            `json:"isApiErrorMessage"`
+	Message           json.RawMessage `json:"message"`
 }
 
 // ParseMetadata 流式解析单个会话文件元数据。
@@ -188,6 +190,7 @@ func (a *Adapter) ParseMetadata(
 		lastTs           *time.Time
 		usageSum         = &model.TokenUsage{Source: model.UsageSourceMessageMetadata}
 		permissionMode   string
+		turn             turnSnapshot
 	)
 	for {
 		o, ok, err := r.Next()
@@ -220,6 +223,11 @@ func (a *Adapter) ParseMetadata(
 		switch line.Type {
 		case "user":
 			s.UserMessageCount++
+			if line.IsAPIErrorMessage {
+				turn.apply(model.TurnStateFailed, model.TurnStateSourceNative, "API error", ts, hasTS)
+			} else {
+				turn.apply(model.TurnStateWorking, model.TurnStateSourceInferred, "user message", ts, hasTS)
+			}
 			if !firstQuestionSet {
 				if q, ok := questionFromLine(&line); ok {
 					s.FirstQuestion = q
@@ -234,6 +242,23 @@ func (a *Adapter) ParseMetadata(
 			}
 		case "assistant":
 			s.MessageCount++
+			meta := parseAssistantMeta(line.Message)
+			switch {
+			case line.IsAPIErrorMessage || meta.IsAPIErrorMessage:
+				turn.apply(model.TurnStateFailed, model.TurnStateSourceNative, "API error", ts, hasTS)
+			case meta.StopReason == "end_turn" || meta.StopReason == "stop_sequence":
+				turn.apply(model.TurnStateCompleted, model.TurnStateSourceNative,
+					"assistant.stop_reason="+meta.StopReason, ts, hasTS)
+			case meta.StopReason == "max_tokens" || meta.StopReason == "refusal":
+				turn.apply(model.TurnStateFailed, model.TurnStateSourceNative,
+					"assistant.stop_reason="+meta.StopReason, ts, hasTS)
+			case meta.StopReason == "tool_use" || meta.hasToolUse():
+				turn.apply(model.TurnStateWorking, model.TurnStateSourceNative, "assistant tool_use", ts, hasTS)
+			case meta.StopReason == "pause_turn":
+				turn.apply(model.TurnStateWorking, model.TurnStateSourceNative, "assistant paused", ts, hasTS)
+			default:
+				turn.apply(model.TurnStateWorking, model.TurnStateSourceInferred, "assistant message", ts, hasTS)
+			}
 			if u := parseUsage(line.Message); u != nil {
 				// input 为累计上下文值，output 为增量
 				if u.InputTokens != nil && *u.InputTokens > 0 {
@@ -261,8 +286,26 @@ func (a *Adapter) ParseMetadata(
 					usageSum.RawFields["model"] = m
 				}
 			}
+		case "system":
+			switch line.Subtype {
+			case "turn_duration":
+				turn.apply(model.TurnStateCompleted, model.TurnStateSourceNative,
+					"system.turn_duration", ts, hasTS)
+			case "api_error":
+				turn.apply(model.TurnStateFailed, model.TurnStateSourceNative,
+					"system.api_error", ts, hasTS)
+			}
 		}
 	}
+
+	if turn.state == "" {
+		turn.state = model.TurnStateUnknown
+		turn.source = model.TurnStateSourceUnknown
+	}
+	s.TurnState = turn.state
+	s.TurnStateAt = turn.at
+	s.TurnStateSource = turn.source
+	s.TurnStateDetail = turn.detail
 
 	if s.StartedAt == nil {
 		s.StartTimeSource = model.TimeSourceFileMtime

@@ -26,6 +26,7 @@ const (
 	typeUser        = "user"
 	typeAssistant   = "assistant"
 	typeCompaction  = "compaction"
+	typeIdle        = "idle"
 	typeText        = "text"
 	typeTool        = "tool"
 	statusCompleted = "completed"
