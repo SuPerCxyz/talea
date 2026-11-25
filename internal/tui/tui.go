@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/paginator"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -60,9 +61,16 @@ var (
 			Padding(0, 1)
 	footerDescStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.AdaptiveColor{Light: "#333333", Dark: "#e0e0e0"})
+	// footerSeparatorStyle 使用低对比度灰色，避免分隔符抢过按键与描述。
 	footerSeparatorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#9a9a9a"})
+	// paginationPageStyle 高亮当前页编号，与选中行使用同一主题色。
+	paginationPageStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"})
+	// paginationLabelStyle 弱化页码中的固定文案。
+	paginationLabelStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#9a9a9a"})
 )
 
 // newListDelegate 返回高对比度的列表项样式（每项 3 行：agent+usage / 首问 / 最近消息）。
@@ -112,37 +120,33 @@ func newListStyles() list.Styles {
 		Padding(0, 0, 1, 2)
 	st.PaginationStyle = lipgloss.NewStyle().PaddingLeft(2)
 	st.HelpStyle = lipgloss.NewStyle().Padding(1, 0, 0, 2)
-	// 选中/未选中 = 字形（★/☆）+ 粗细 + 颜色 三重区分，间隔 pageDotGapCols 空格。
-	st.ActivePaginationDot = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.AdaptiveColor{Light: "#5b2a86", Dark: "#ffd166"}).
-		SetString(pageDotActive + strings.Repeat(" ", pageDotGapCols))
-	st.InactivePaginationDot = lipgloss.NewStyle().
-		Foreground(lipgloss.AdaptiveColor{Light: "#6b6b6b", Dark: "#9a9a9a"}).
-		SetString(pageDotInactive + strings.Repeat(" ", pageDotGapCols))
 	st.DividerDot = lipgloss.NewStyle().
 		Foreground(subFG).
 		SetString(" " + bullet + " ")
 	return st
 }
 
+// pageIndicatorFormat 返回紧凑页码格式（如「第 1 / 16 页」），
+// 当前页编号使用主题色高亮，总页数与固定文案弱化。
+// 返回值交给 Paginator.ArabicFormat，由 fmt.Sprintf 填入当前页/总页数。
+func pageIndicatorFormat() string {
+	if i18n.IsZh() {
+		return paginationLabelStyle.Render("第 ") +
+			paginationPageStyle.Render("%d") +
+			paginationLabelStyle.Render(" / %d 页")
+	}
+	return paginationLabelStyle.Render("Page ") +
+		paginationPageStyle.Render("%d") +
+		paginationLabelStyle.Render(" / %d")
+}
+
 const (
 	// bullet 用于状态栏分隔点。
 	bullet = "•"
-	// pageDotActive 分页当前页字形：实心星星 ★（U+2605）。
-	pageDotActive = "★"
-	// pageDotInactive 分页非当前页字形：空心星星 ☆（U+2606）。
-	// ☆ 与 ★ 同属 Misc Symbols、同为 EastAsianWidth=A（当前 locale 均算 1 列），
-	// 宽度一致、不改变分页布局计算；主流 Linux 等宽字体
-	//（DejaVu/Noto Sans Mono/Ubuntu Mono/FreeMono）均覆盖两者。
-	pageDotInactive = "☆"
-	// pageDotGapCols 分页字形与其后相邻字形的间隔空格（列数）。
-	pageDotGapCols = 2
-	// footerSeparator 页脚快捷键提示之间的分隔：恒为实心星星 ★
-	//（页脚没有选中/未选中概念，不使用空心 ☆）。
-	footerSeparator = "★"
-	// footerSepPadCols 页脚分隔符两侧留白（列数），让星星与按键文字块分离。
-	footerSepPadCols = 4
+	// footerSeparator 页脚快捷键提示之间的低对比度分隔符。
+	footerSeparator = "|"
+	// footerSepPadCols 页脚分隔符两侧留白（列数）。
+	footerSepPadCols = 2
 	// loadingCardMaxWidth 限制加载卡片宽度，避免宽屏中文案被拉得过散。
 	loadingCardMaxWidth = 64
 )
@@ -289,10 +293,12 @@ func newMain(ctx context.Context, a *app.App, sessions []*model.Session, usages 
 	l.SetShowTitle(false)
 	l.SetShowHelp(false)
 	l.Styles = newListStyles()
-	// bubbles list.New 只把默认圆点写入 Paginator，SetStyles 不会传播；
-	// 显式同步，否则自定义分页圆点样式不生效。
-	l.Paginator.ActiveDot = l.Styles.ActivePaginationDot.String()
-	l.Paginator.InactiveDot = l.Styles.InactivePaginationDot.String()
+	// 列表本身固定按结束时间倒序；过滤结果也必须保持该顺序，
+	// 因此使用不按模糊匹配分数重排的 UnsortedFilter。
+	l.Filter = list.UnsortedFilter
+	// 分页使用紧凑页码，替代占满底部的点阵/星星。
+	l.Paginator.Type = paginator.Arabic
+	l.Paginator.ArabicFormat = pageIndicatorFormat()
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot

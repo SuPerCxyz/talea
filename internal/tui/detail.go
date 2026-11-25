@@ -282,11 +282,14 @@ func (d *detailModel) renderSubagents() string {
 	if d.db == nil {
 		return i18n.Tr("Database unavailable", "数据库不可用")
 	}
+	// 与其他会话列表一致：按结束时间倒序，缺失时依次用开始时间、最后活动时间兜底。
 	rows, err := d.db.SQL().QueryContext(d.ctx, `
-		SELECT s.session_id, s.first_question, s.started_at, s.has_token_usage
+		SELECT s.session_id, s.first_question,
+		       COALESCE(s.ended_at, s.started_at, s.last_activity_at) AS end_ts,
+		       s.has_token_usage
 		FROM sessions s
 		WHERE s.agent_instance_id = ? AND s.parent_session_id = ?
-		ORDER BY s.started_at ASC`,
+		ORDER BY end_ts DESC, s.rowid DESC`,
 		d.sess.AgentInstanceID, d.sess.SessionID)
 	if err != nil {
 		return i18n.Trf("Failed to load sub-sessions: %v", "加载子会话失败：%v", err)
@@ -299,16 +302,16 @@ func (d *detailModel) renderSubagents() string {
 	for rows.Next() {
 		var (
 			sid, fq  string
-			started  *int64
+			ended    *int64
 			hasUsage bool
 		)
-		if err := rows.Scan(&sid, &fq, &started, &hasUsage); err != nil {
+		if err := rows.Scan(&sid, &fq, &ended, &hasUsage); err != nil {
 			continue
 		}
 		found = true
 		ts := ""
-		if started != nil {
-			ts = time.Unix(*started, 0).Format("01-02 15:04")
+		if ended != nil {
+			ts = time.Unix(*ended, 0).Format("01-02 15:04")
 		}
 		sb.WriteString(joinTableCells([]string{
 			tableCell(ts, widths[0]),
